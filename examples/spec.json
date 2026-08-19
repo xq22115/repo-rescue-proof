@@ -1,0 +1,19 @@
+{
+  "title": "Repair CI",
+  "target": "owner/repo#123",
+  "revision": "abc123",
+  "verification_command": "python -m unittest -v",
+  "root_cause": "A config mismatch caused the failure.",
+  "patch_summary": "Aligned the config and added a regression test.",
+  "before": {
+    "status": "FAIL",
+    "output": "2 tests failed"
+  },
+  "after": {
+    "status": "PASS",
+    "output": "8 tests passed"
+  },
+  "limitations": [
+    "Production deployment was not performed."
+  ]
+}
