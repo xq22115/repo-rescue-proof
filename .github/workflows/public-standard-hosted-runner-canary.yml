@@ -1,0 +1,43 @@
+name: Public Standard Hosted Runner Canary
+
+on:
+  push:
+    branches:
+      - diagnostics/public-standard-hosted-runner-canary-20260822
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu:
+    name: ubuntu-latest assignment canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark runner started
+        shell: bash
+        run: |
+          echo "runner_started=true"
+          echo "runner_os=${{ runner.os }}"
+          echo "runner_arch=${{ runner.arch }}"
+
+  windows-2022:
+    name: windows-2022 assignment canary
+    runs-on: windows-2022
+    steps:
+      - name: Mark runner started
+        shell: pwsh
+        run: |
+          Write-Output 'runner_started=true'
+          Write-Output "runner_os=${{ runner.os }}"
+          Write-Output "runner_arch=${{ runner.arch }}"
+
+  windows-latest:
+    name: windows-latest assignment canary
+    runs-on: windows-latest
+    steps:
+      - name: Mark runner started
+        shell: pwsh
+        run: |
+          Write-Output 'runner_started=true'
+          Write-Output "runner_os=${{ runner.os }}"
+          Write-Output "runner_arch=${{ runner.arch }}"
