@@ -89,7 +89,23 @@ try {
     $baselineReceipt = Invoke-Case -Name 'baseline' -Manifest $baseline -ShouldPass $true
     if ($baselineReceipt.counts.serverCount -ne 2 -or $baselineReceipt.counts.toolCount -ne 3) { throw 'baseline counts mismatch.' }
     if ($baselineReceipt.routes.Count -ne 3) { throw 'baseline route count mismatch.' }
-    if (-not $baselineReceipt.routingPolicy.serverInfoNameAcceptedAsSoleServerIdentity -eq $false) { throw 'baseline server-name policy mismatch.' }
+    if ($baselineReceipt.routingPolicy.serverInfoNameAcceptedAsSoleServerIdentity) { throw 'baseline server-name policy mismatch.' }
+
+    # These constants are SHA-256(serverIdentitySha256 + U+001F + toolName),
+    # computed independently from the validator. They pin the exact route encoding
+    # so PS5.1 and PS7 cannot silently produce edition-specific fingerprints.
+    $expectedRouteFingerprints = @{
+        'alpha_search' = '90a8e7f64695556f1449c6366201ff130c5d4c9dff31f6c7f3c3505f3bd68b82'
+        'alpha_status' = '64853816f775f78c35839c0ce5d431b8e08009cae2737c822472dd2849364a38'
+        'beta_search' = 'e4f13744d9e51192865fe3bca28978ec72125aeaced988f543d7640d0f9bc33e'
+    }
+    foreach ($route in @($baselineReceipt.routes)) {
+        $expected = [string]$expectedRouteFingerprints[[string]$route.exposedName]
+        if ([string]::IsNullOrWhiteSpace($expected)) { throw "unexpected baseline route: $($route.exposedName)" }
+        if ([string]$route.structuredRouteSha256 -cne $expected) {
+            throw "structured route fingerprint mismatch for $($route.exposedName): expected=$expected actual=$($route.structuredRouteSha256)"
+        }
+    }
 
     $duplicateVisibleName = [ordered]@{
         schemaVersion = 1
