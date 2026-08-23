@@ -77,9 +77,91 @@ foreach ($entry in $expectedAliases.GetEnumerator()) {
     }
 }
 
+# Native command-precedence probe: exact cmdlet spellings are not immutable command
+# identity when used unqualified. A same-name function hides the cmdlet. A
+# module-qualified cmdlet call bypasses that shadow and is the stronger static
+# authority for a distributed script.
+$originalLocation = (Get-Location).Path
+$setLocationShadow = & {
+    function Set-Location {
+        param([string]$Path)
+        "shadow-set-location:$Path"
+    }
+
+    $resolved = Get-Command -Name Set-Location -ErrorAction Stop
+    $beforeProvider = (Get-Location).Provider.Name
+    $shadowOutput = Set-Location 'Variable:' | Out-String
+    $afterUnqualifiedProvider = (Get-Location).Provider.Name
+
+    Microsoft.PowerShell.Management\Set-Location -LiteralPath 'Variable:'
+    $afterQualifiedProvider = (Get-Location).Provider.Name
+    Microsoft.PowerShell.Management\Set-Location -LiteralPath $originalLocation
+
+    [pscustomobject]@{
+        ResolvedType = [string]$resolved.CommandType
+        BeforeProvider = [string]$beforeProvider
+        AfterUnqualifiedProvider = [string]$afterUnqualifiedProvider
+        AfterQualifiedProvider = [string]$afterQualifiedProvider
+        ShadowOutput = [string]$shadowOutput.Trim()
+    }
+}
+if ($setLocationShadow.ResolvedType -ne 'Function') {
+    throw "SET_LOCATION_FUNCTION_SHADOW_NOT_OBSERVED type=$($setLocationShadow.ResolvedType)"
+}
+if ($setLocationShadow.AfterUnqualifiedProvider -eq 'Variable') {
+    throw 'UNQUALIFIED_SET_LOCATION_BYPASSED_FUNCTION_SHADOW'
+}
+if ($setLocationShadow.ShadowOutput -notmatch '^shadow-set-location:Variable:$') {
+    throw "SET_LOCATION_FUNCTION_SHADOW_OUTPUT_MISMATCH output=$($setLocationShadow.ShadowOutput)"
+}
+if ($setLocationShadow.AfterQualifiedProvider -ne 'Variable') {
+    throw "MODULE_QUALIFIED_SET_LOCATION_DID_NOT_REACH_VARIABLE_PROVIDER provider=$($setLocationShadow.AfterQualifiedProvider)"
+}
+
+$pushLocationShadow = & {
+    function Push-Location {
+        param([string]$Path)
+        "shadow-push-location:$Path"
+    }
+
+    $resolved = Get-Command -Name Push-Location -ErrorAction Stop
+    $beforeProvider = (Get-Location).Provider.Name
+    $shadowOutput = Push-Location 'Variable:' | Out-String
+    $afterUnqualifiedProvider = (Get-Location).Provider.Name
+
+    Microsoft.PowerShell.Management\Push-Location -LiteralPath 'Variable:'
+    $afterQualifiedProvider = (Get-Location).Provider.Name
+    Microsoft.PowerShell.Management\Pop-Location
+    $afterQualifiedPopPath = (Get-Location).Path
+
+    [pscustomobject]@{
+        ResolvedType = [string]$resolved.CommandType
+        BeforeProvider = [string]$beforeProvider
+        AfterUnqualifiedProvider = [string]$afterUnqualifiedProvider
+        AfterQualifiedProvider = [string]$afterQualifiedProvider
+        AfterQualifiedPopPath = [string]$afterQualifiedPopPath
+        ShadowOutput = [string]$shadowOutput.Trim()
+    }
+}
+if ($pushLocationShadow.ResolvedType -ne 'Function') {
+    throw "PUSH_LOCATION_FUNCTION_SHADOW_NOT_OBSERVED type=$($pushLocationShadow.ResolvedType)"
+}
+if ($pushLocationShadow.AfterUnqualifiedProvider -eq 'Variable') {
+    throw 'UNQUALIFIED_PUSH_LOCATION_BYPASSED_FUNCTION_SHADOW'
+}
+if ($pushLocationShadow.ShadowOutput -notmatch '^shadow-push-location:Variable:$') {
+    throw "PUSH_LOCATION_FUNCTION_SHADOW_OUTPUT_MISMATCH output=$($pushLocationShadow.ShadowOutput)"
+}
+if ($pushLocationShadow.AfterQualifiedProvider -ne 'Variable') {
+    throw "MODULE_QUALIFIED_PUSH_LOCATION_DID_NOT_REACH_VARIABLE_PROVIDER provider=$($pushLocationShadow.AfterQualifiedProvider)"
+}
+if ($pushLocationShadow.AfterQualifiedPopPath -ne $originalLocation) {
+    throw "MODULE_QUALIFIED_POP_LOCATION_DID_NOT_RESTORE_ORIGINAL_PATH expected=$originalLocation actual=$($pushLocationShadow.AfterQualifiedPopPath)"
+}
+
 $result = [ordered]@{
     component = 'powershell-location-alias-resolution-canary'
-    schemaVersion = 2
+    schemaVersion = 3
     psEdition = [string]$PSVersionTable.PSEdition
     psVersion = [string]$PSVersionTable.PSVersion
     osVersion = [string][Environment]::OSVersion.Version
@@ -91,6 +173,12 @@ $result = [ordered]@{
     allScopeOptionMustBePreservedObserved = $true
     staticAliasExecutionAuthorityAccepted = $false
     priorSessionAliasStateKnownToStaticAnalyzer = $false
+    unqualifiedSetLocationCanBeFunctionShadowedObserved = $true
+    unqualifiedPushLocationCanBeFunctionShadowedObserved = $true
+    moduleQualifiedSetLocationBypassesFunctionShadowObserved = $true
+    moduleQualifiedPushLocationBypassesFunctionShadowObserved = $true
+    unqualifiedCanonicalLocationCommandImmutableIdentityAccepted = $false
+    moduleQualifiedCanonicalLocationCommandIdentityAccepted = $true
     observations = $observations
 }
 
