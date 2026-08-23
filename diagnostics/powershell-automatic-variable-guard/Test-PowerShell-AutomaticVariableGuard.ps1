@@ -432,7 +432,7 @@ Set-Item 'Variable:PID' -Value 1 -Force
 Set-Item -Force 'Variable:PID' -Value 1
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-set-item-backslash-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:\\\\PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-backslash-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:\\PID'.*automatic variable" -Content @'
 Set-Item -LiteralPath 'Variable:\PID' -Value 1 -Force
 '@
 
