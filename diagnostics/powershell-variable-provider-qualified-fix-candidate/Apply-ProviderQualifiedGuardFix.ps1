@@ -9,8 +9,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$source = [System.IO.File]::ReadAllText($InputPath)
-$old = @'
+function ConvertTo-LfText {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
+# Normalize the candidate to repository-stable LF bytes before replacement. This
+# lets the exact bytes exercised on Windows be committed without a whole-file
+# CRLF churn when the canonical Git blob uses LF.
+$source = ConvertTo-LfText -Text ([System.IO.File]::ReadAllText($InputPath))
+$old = ConvertTo-LfText -Text @'
     $providerMatch = [regex]::Match($PathText, '^(?i:variable):(?<target>.*)$')
     if (-not $providerMatch.Success) {
         return $false
@@ -18,7 +26,7 @@ $old = @'
 
     $target = [string]$providerMatch.Groups['target'].Value
 '@
-$new = @'
+$new = ConvertTo-LfText -Text @'
     # PowerShell accepts both drive-qualified Variable:<target> and provider-
     # qualified Variable::<target> paths. The built-in provider can also be
     # addressed as Microsoft.PowerShell.Core\Variable::<target>. Recognize only
@@ -73,5 +81,10 @@ if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
 }
 [System.IO.File]::WriteAllText($OutputPath, $patched, [System.Text.UTF8Encoding]::new($false))
 
+$bytes = [System.IO.File]::ReadAllBytes($OutputPath)
+if ($bytes -contains [byte]13) {
+    throw 'Candidate output unexpectedly contains carriage-return bytes.'
+}
 $hash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host ("PROVIDER_QUALIFIED_GUARD_CANDIDATE_SHA256={0}" -f $hash)
+Write-Host ("PROVIDER_QUALIFIED_GUARD_CANDIDATE_LENGTH={0}" -f $bytes.Length)
