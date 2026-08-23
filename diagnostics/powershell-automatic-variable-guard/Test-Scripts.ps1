@@ -263,22 +263,32 @@ function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
 function Get-BraintrustVariableCommandParameterSpec {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('Set-Variable', 'New-Variable')]
+        [ValidateSet('Set-Variable', 'New-Variable', 'Clear-Variable', 'Remove-Variable')]
         [string]$CommandName
     )
 
     # Keep this deliberately bounded to the static parameter surface needed to
-    # locate positional -Name arguments for these two cmdlets. The switch/value
+    # locate positional -Name arguments for these bounded variable cmdlets. The switch/value
     # distinction lets the guard recognize forms such as `New-Variable -Force PID`
     # without trying to become a general PowerShell parameter binder.
-    $switches = @('Force', 'PassThru', 'WhatIf', 'Confirm', 'Verbose', 'Debug')
+    $switches = @('Force', 'WhatIf', 'Confirm', 'Verbose', 'Debug')
+    if ($CommandName -ne 'Remove-Variable') {
+        $switches += 'PassThru'
+    }
+
     $values = @(
-        'Name', 'Value', 'Description', 'Option', 'Visibility', 'Scope',
+        'Name', 'Scope',
         'ErrorAction', 'ErrorVariable', 'WarningAction', 'WarningVariable',
         'InformationAction', 'InformationVariable', 'OutVariable', 'OutBuffer',
         'PipelineVariable', 'ProgressAction'
     )
     if ($CommandName -eq 'Set-Variable') {
+        $values += @('Value', 'Description', 'Option', 'Visibility', 'Include', 'Exclude')
+    }
+    elseif ($CommandName -eq 'New-Variable') {
+        $values += @('Value', 'Description', 'Option', 'Visibility')
+    }
+    elseif ($CommandName -eq 'Clear-Variable' -or $CommandName -eq 'Remove-Variable') {
         $values += @('Include', 'Exclude')
     }
 
@@ -312,12 +322,64 @@ function Resolve-BraintrustVariableCommandParameter {
     return $matches[0]
 }
 
+function Get-BraintrustEnclosingStatementContainer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.Ast]$Ast
+    )
+
+    $current = $Ast
+    while ($null -ne $current) {
+        if ($current -is [System.Management.Automation.Language.StatementBlockAst] -or
+            $current -is [System.Management.Automation.Language.NamedBlockAst]) {
+            return $current
+        }
+        $current = $current.Parent
+    }
+    return $null
+}
+
+function Test-BraintrustBuiltinAliasDefinitelyShadowed {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AliasName,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [System.Management.Automation.Language.FunctionDefinitionAst[]]$FunctionDefinitionAsts = @()
+    )
+
+    # Function declarations execute as statements; a later declaration must not
+    # retroactively excuse an earlier use of a built-in alias. To avoid guessing
+    # across conditional/control-flow boundaries, only accept a matching function
+    # definition that has already completed in the same statement container.
+    $commandContainer = Get-BraintrustEnclosingStatementContainer -Ast $CommandAst
+    if ($null -eq $commandContainer) {
+        return $false
+    }
+
+    foreach ($functionAst in $FunctionDefinitionAsts) {
+        if ([string]$functionAst.Name -ine $AliasName) {
+            continue
+        }
+        if ($functionAst.Extent.EndOffset -ge $CommandAst.Extent.StartOffset) {
+            continue
+        }
+        $functionContainer = Get-BraintrustEnclosingStatementContainer -Ast $functionAst
+        if ($null -ne $functionContainer -and [object]::ReferenceEquals($functionContainer, $commandContainer)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-BraintrustVariableNameWriteTargets {
     param(
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.CommandAst]$CommandAst,
 
-        [string[]]$DefinedFunctionNames = @()
+        [System.Management.Automation.Language.FunctionDefinitionAst[]]$FunctionDefinitionAsts = @()
     )
 
     $commandName = [string]$CommandAst.GetCommandName()
@@ -352,14 +414,32 @@ function Get-BraintrustVariableNameWriteTargets {
         $writeKind = 'new-variable'
         $isBuiltinAlias = $true
     }
+    elseif ($leafName -ieq 'Clear-Variable') {
+        $canonicalCommand = 'Clear-Variable'
+        $writeKind = 'clear-variable'
+    }
+    elseif ($leafName -ieq 'clv') {
+        $canonicalCommand = 'Clear-Variable'
+        $writeKind = 'clear-variable'
+        $isBuiltinAlias = $true
+    }
+    elseif ($leafName -ieq 'Remove-Variable') {
+        $canonicalCommand = 'Remove-Variable'
+        $writeKind = 'remove-variable'
+    }
+    elseif ($leafName -ieq 'rv') {
+        $canonicalCommand = 'Remove-Variable'
+        $writeKind = 'remove-variable'
+        $isBuiltinAlias = $true
+    }
     else {
         return @()
     }
 
-    # Locally-defined functions can shadow built-in aliases such as set/sv/nv. Do
+    # Locally-defined functions can shadow built-in aliases such as set/sv/nv/clv/rv. Do
     # not reinterpret those function calls as variable cmdlets. Dynamic Set-Alias
     # shadowing remains outside this small dependency-free static guard.
-    if ($isBuiltinAlias -and ($DefinedFunctionNames -contains $leafName)) {
+    if ($isBuiltinAlias -and (Test-BraintrustBuiltinAliasDefinitelyShadowed -AliasName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts)) {
         return @()
     }
 
@@ -458,10 +538,10 @@ foreach ($file in $files) {
     }
 
     $collisions = @()
-    $definedFunctionNames = @($ast.FindAll({
+    $functionDefinitionAsts = @($ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
-    }, $true) | ForEach-Object { [string]$_.Name })
+    }, $true))
 
     $parameterAsts = $ast.FindAll({
         param($node)
@@ -532,13 +612,15 @@ foreach ($file in $files) {
         $node -is [System.Management.Automation.Language.CommandAst]
     }, $true)
     foreach ($commandAst in $commandAsts) {
-        foreach ($writeTarget in (Get-BraintrustVariableNameWriteTargets -CommandAst $commandAst -DefinedFunctionNames $definedFunctionNames)) {
+        foreach ($writeTarget in (Get-BraintrustVariableNameWriteTargets -CommandAst $commandAst -FunctionDefinitionAsts $functionDefinitionAsts)) {
             $targetAst = $writeTarget.TargetAst
             $writeKind = [string]$writeTarget.Kind
             foreach ($literalName in (Get-BraintrustStaticStringValues -ValueAst $targetAst)) {
-                if (Test-BraintrustAutomaticVariableNameText -Name $literalName) {
+                $isAutomaticVariableName = Test-BraintrustAutomaticVariableNameText -Name $literalName
+                $isKnownAllVariablesPattern = (($writeKind -eq 'clear-variable' -or $writeKind -eq 'remove-variable') -and ([string]$literalName -eq '*'))
+                if ($isAutomaticVariableName -or $isKnownAllVariablesPattern) {
                     $collisions += [pscustomobject]@{
-                        Kind = $writeKind
+                        Kind = $(if ($isKnownAllVariablesPattern) { $writeKind + '-all-variables-pattern' } else { $writeKind })
                         Variable = [string]$literalName
                         Extent = $targetAst.Extent
                     }

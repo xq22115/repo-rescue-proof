@@ -126,6 +126,41 @@ finally {
     Remove-Variable -Name $runtimeNewPrefixProbeN, $runtimeNewPrefixProbeNa, $runtimeNewPrefixProbeNam, $runtimeNewAliasProbe, $runtimeReadOnlyProbe, $runtimeNewLeadingForceProbe, $runtimeNewLeadingErrorActionProbe -Force -ErrorAction SilentlyContinue
 }
 
+# Native behavior probe: Clear-Variable and Remove-Variable share the same
+# mandatory position-0 Name and unique -Name prefix surface. Prove -N/-Na/-Nam
+# binding on ordinary variables before relying on the static destructive-write guard.
+$runtimeClearProbeN = 'BraintrustClearProbeN'
+$runtimeClearProbeNa = 'BraintrustClearProbeNa'
+$runtimeClearProbeNam = 'BraintrustClearProbeNam'
+$runtimeRemoveProbeN = 'BraintrustRemoveProbeN'
+$runtimeRemoveProbeNa = 'BraintrustRemoveProbeNa'
+$runtimeRemoveProbeNam = 'BraintrustRemoveProbeNam'
+try {
+    Set-Variable -Name $runtimeClearProbeN -Value 'clear-N'
+    Set-Variable -Name $runtimeClearProbeNa -Value 'clear-Na'
+    Set-Variable -Name $runtimeClearProbeNam -Value 'clear-Nam'
+    Clear-Variable -N $runtimeClearProbeN
+    Clear-Variable -Na $runtimeClearProbeNa
+    Clear-Variable -Nam $runtimeClearProbeNam
+    foreach ($probeName in @($runtimeClearProbeN, $runtimeClearProbeNa, $runtimeClearProbeNam)) {
+        $probe = Get-Variable -Name $probeName -ErrorAction Stop
+        if ($null -ne $probe.Value) { throw "Clear-Variable unique -Name prefix did not clear $probeName." }
+    }
+
+    Set-Variable -Name $runtimeRemoveProbeN -Value 'remove-N'
+    Set-Variable -Name $runtimeRemoveProbeNa -Value 'remove-Na'
+    Set-Variable -Name $runtimeRemoveProbeNam -Value 'remove-Nam'
+    Remove-Variable -N $runtimeRemoveProbeN
+    Remove-Variable -Na $runtimeRemoveProbeNa
+    Remove-Variable -Nam $runtimeRemoveProbeNam
+    foreach ($probeName in @($runtimeRemoveProbeN, $runtimeRemoveProbeNa, $runtimeRemoveProbeNam)) {
+        if ($null -ne (Get-Variable -Name $probeName -ErrorAction SilentlyContinue)) { throw "Remove-Variable unique -Name prefix did not remove $probeName." }
+    }
+}
+finally {
+    Remove-Variable -Name $runtimeClearProbeN, $runtimeClearProbeNa, $runtimeClearProbeNam, $runtimeRemoveProbeN, $runtimeRemoveProbeNa, $runtimeRemoveProbeNam -Force -ErrorAction SilentlyContinue
+}
+
 try {
     Invoke-BraintrustLintFixture -Name 'safe-reads-and-ordinary-writes' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
 $nativeWindowsObserved = $IsWindows
@@ -165,6 +200,22 @@ function nv {
     Write-Output "$Name=$Value"
 }
 nv PID 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'later-set-function-does-not-shadow-earlier-builtin-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+set PID 1
+function set {
+    param($Name, $Value)
+    Write-Output "$Name=$Value"
+}
+'@
+
+    Invoke-BraintrustLintFixture -Name 'later-nv-function-does-not-shadow-earlier-builtin-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'PID'.*automatic variable" -Content @'
+nv PID 1 -Force
+function nv {
+    param($Name, $Value)
+    Write-Output "$Name=$Value"
+}
 '@
 
     Invoke-BraintrustLintFixture -Name 'case-insensitive-iswindows-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'isWindows'.*automatic variable" -Content @'
@@ -299,6 +350,68 @@ New-Variable PID 1 -Force
 
     Invoke-BraintrustLintFixture -Name 'new-variable-module-qualified' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'Error'.*automatic variable" -Content @'
 Microsoft.PowerShell.Utility\New-Variable -Name Error -Value @() -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'clear-variable-ordinary-name' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+$ordinaryClearTarget = 1
+Clear-Variable -Name ordinaryClearTarget
+'@
+
+    Invoke-BraintrustLintFixture -Name 'remove-variable-ordinary-name' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+$ordinaryRemoveTarget = 1
+Remove-Variable -Name ordinaryRemoveTarget
+'@
+
+    Invoke-BraintrustLintFixture -Name 'clear-variable-explicit-automatic-name' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-variable variable 'PID'.*automatic variable" -Content @'
+Clear-Variable -Name PID -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'clear-variable-alias-abbreviated-name' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-variable variable 'Error'.*automatic variable" -Content @'
+clv -Nam Error -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'clear-variable-module-qualified' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-variable variable 'host'.*automatic variable" -Content @'
+Microsoft.PowerShell.Utility\Clear-Variable -N host -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'clear-variable-adjacent-constant' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-variable-adjacent-constant variable 'PID'.*automatic variable" -Content @'
+$name = 'PID'
+Clear-Variable -Name $name -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'clear-variable-all-variables-pattern' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-variable-all-variables-pattern variable '\*'.*automatic variable" -Content @'
+Clear-Variable -Name '*' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'remove-variable-explicit-automatic-name' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-variable variable 'PID'.*automatic variable" -Content @'
+Remove-Variable -Name PID -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'remove-variable-alias-abbreviated-name' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-variable variable 'host'.*automatic variable" -Content @'
+rv -Na host -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'remove-variable-module-qualified' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-variable variable 'Error'.*automatic variable" -Content @'
+Microsoft.PowerShell.Utility\Remove-Variable -Nam Error -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'remove-variable-adjacent-constant' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-variable-adjacent-constant variable 'PID'.*automatic variable" -Content @'
+$name = 'PID'
+Remove-Variable -Name $name -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'remove-variable-all-variables-pattern' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-variable-all-variables-pattern variable '\*'.*automatic variable" -Content @'
+Remove-Variable -Name '*' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'shadowed-clv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function clv { param($Name) Write-Output $Name }
+clv PID
+'@
+
+    Invoke-BraintrustLintFixture -Name 'shadowed-rv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function rv { param($Name) Write-Output $Name }
+rv PID
 '@
 }
 finally {
