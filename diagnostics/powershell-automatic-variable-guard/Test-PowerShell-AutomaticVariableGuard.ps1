@@ -1,0 +1,87 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$lintScript = Join-Path $PSScriptRoot 'Test-Scripts.ps1'
+if (-not (Test-Path -LiteralPath $lintScript -PathType Leaf)) {
+    throw "Missing Test-Scripts.ps1 at $lintScript"
+}
+
+$currentProcess = [System.Diagnostics.Process]::GetCurrentProcess()
+$shellPath = $currentProcess.MainModule.FileName
+if ([string]::IsNullOrWhiteSpace($shellPath) -or -not (Test-Path -LiteralPath $shellPath -PathType Leaf)) {
+    throw 'Could not resolve the current PowerShell executable for isolated lint fixtures.'
+}
+
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("braintrust-automatic-variable-guard-{0}" -f [guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $tempRoot -Force)
+
+function Invoke-BraintrustLintFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Content,
+
+        [Parameter(Mandatory = $true)]
+        [int]$ExpectedExitCode,
+
+        [string]$ExpectedOutputPattern
+    )
+
+    $caseRoot = Join-Path $tempRoot $Name
+    [void](New-Item -ItemType Directory -Path $caseRoot -Force)
+    $fixturePath = Join-Path $caseRoot 'fixture.ps1'
+    Set-Content -LiteralPath $fixturePath -Value $Content -Encoding UTF8
+
+    $captured = (& $shellPath -NoLogo -NoProfile -ExecutionPolicy Bypass -File $lintScript -Root $caseRoot 2>&1 | Out-String)
+    $observedExitCode = $LASTEXITCODE
+
+    if ($observedExitCode -ne $ExpectedExitCode) {
+        throw "Fixture '$Name' expected exit $ExpectedExitCode but observed $observedExitCode. Output: $captured"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedOutputPattern) -and $captured -notmatch $ExpectedOutputPattern) {
+        throw "Fixture '$Name' did not emit expected pattern '$ExpectedOutputPattern'. Output: $captured"
+    }
+}
+
+try {
+    Invoke-BraintrustLintFixture -Name 'safe-reads-and-ordinary-writes' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+$nativeWindowsObserved = $IsWindows
+$processIdObserved = $PID
+$hostNameObserved = $Host.Name
+$ordinaryValue = 1
+$leftValue, $rightValue = 1, 2
+foreach ($item in 1..2) { $ordinaryValue += $item }
+$env:HOME = 'fixture-only'
+'@
+
+    Invoke-BraintrustLintFixture -Name 'case-insensitive-iswindows-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment 'isWindows'.*automatic variable" -Content @'
+$isWindows = $true
+'@
+
+    Invoke-BraintrustLintFixture -Name 'scoped-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment 'script:PID'.*automatic variable" -Content @'
+$script:PID = 42
+'@
+
+    Invoke-BraintrustLintFixture -Name 'automatic-variable-parameter' -ExpectedExitCode 1 -ExpectedOutputPattern "parameter 'Host'.*automatic variable" -Content @'
+param([string]$Host)
+Write-Output 'never executed by the lint gate'
+'@
+
+    Invoke-BraintrustLintFixture -Name 'foreach-error-variable' -ExpectedExitCode 1 -ExpectedOutputPattern "foreach-variable 'error'.*automatic variable" -Content @'
+foreach ($error in 1..2) { Write-Output $error }
+'@
+
+    Invoke-BraintrustLintFixture -Name 'tuple-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment 'PID'.*automatic variable" -Content @'
+$safeValue, $PID = 1, 2
+'@
+}
+finally {
+    if (Test-Path -LiteralPath $tempRoot) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host 'PowerShell automatic-variable collision guard regression PASS.' -ForegroundColor Green
