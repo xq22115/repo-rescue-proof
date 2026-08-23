@@ -57,24 +57,24 @@ foreach ($item in 1..2) { $ordinaryValue += $item }
 $env:HOME = 'fixture-only'
 '@
 
-    Invoke-BraintrustLintFixture -Name 'case-insensitive-iswindows-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment 'isWindows'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'case-insensitive-iswindows-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'isWindows'.*automatic variable" -Content @'
 $isWindows = $true
 '@
 
-    Invoke-BraintrustLintFixture -Name 'scoped-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment 'script:PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'scoped-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'script:PID'.*automatic variable" -Content @'
 $script:PID = 42
 '@
 
-    Invoke-BraintrustLintFixture -Name 'automatic-variable-parameter' -ExpectedExitCode 1 -ExpectedOutputPattern "parameter 'Host'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'automatic-variable-parameter' -ExpectedExitCode 1 -ExpectedOutputPattern "parameter variable 'Host'.*automatic variable" -Content @'
 param([string]$Host)
 Write-Output 'never executed by the lint gate'
 '@
 
-    Invoke-BraintrustLintFixture -Name 'foreach-error-variable' -ExpectedExitCode 1 -ExpectedOutputPattern "foreach-variable 'error'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'foreach-error-variable' -ExpectedExitCode 1 -ExpectedOutputPattern "foreach-variable variable 'error'.*automatic variable" -Content @'
 foreach ($error in 1..2) { Write-Output $error }
 '@
 
-    Invoke-BraintrustLintFixture -Name 'tuple-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment 'PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'tuple-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'PID'.*automatic variable" -Content @'
 $safeValue, $PID = 1, 2
 '@
 }
