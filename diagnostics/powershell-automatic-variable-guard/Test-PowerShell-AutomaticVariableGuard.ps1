@@ -487,6 +487,26 @@ Set-Location Variable:
 Set-Item -LiteralPath ordinaryProviderTarget -Value 1
 '@
 
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-ordinary-variable' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Push-Location Variable:
+Set-Item -LiteralPath ordinaryProviderTarget -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+Push-Location Variable:
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-explicit-path-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+Push-Location -Path 'Variable:'
+Clear-Item -LiteralPath PID -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-non-variable-location' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Push-Location .
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
     Invoke-BraintrustLintFixture -Name 'provider-current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
 Set-Location Variable:
 Set-Item -LiteralPath PID -Value 1 -Force
