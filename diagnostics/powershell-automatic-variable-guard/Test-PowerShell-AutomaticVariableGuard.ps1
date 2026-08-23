@@ -492,12 +492,12 @@ Push-Location Variable:
 Set-Item -LiteralPath ordinaryProviderTarget -Value 1
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location-ambiguous-command-identity variable 'PID'.*automatic variable" -Content @'
 Push-Location Variable:
 Set-Item -LiteralPath PID -Value 1 -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-explicit-path-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-push-location-explicit-path-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider-current-location-ambiguous-command-identity variable 'PID'.*automatic variable" -Content @'
 Push-Location -Path 'Variable:'
 Clear-Item -LiteralPath PID -Force
 '@
@@ -507,12 +507,12 @@ Push-Location .
 Set-Item -LiteralPath PID -Value 1 -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location-ambiguous-command-identity variable 'PID'.*automatic variable" -Content @'
 Set-Location Variable:
 Set-Item -LiteralPath PID -Value 1 -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-current-location-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider-current-location-ambiguous-command-identity variable 'PID'.*automatic variable" -Content @'
 Set-Location -Path 'Variable:'; Clear-Item -LiteralPath PID -Force
 '@
 
@@ -521,7 +521,7 @@ Microsoft.PowerShell.Management\Set-Location -LiteralPath 'Variable:'
 Remove-Item -LiteralPath PID -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-current-location-wildcard' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'P\*'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-wildcard' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location-ambiguous-command-identity variable 'P\*'.*automatic variable" -Content @'
 Set-Location Variable:
 Set-Item -Path 'P*' -Value 1 -Force
 '@
@@ -539,6 +539,35 @@ Set-Item -LiteralPath PID -Value 1 -Force
     Invoke-BraintrustLintFixture -Name 'provider-current-location-intervening-statement-declines-inference' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
 Set-Location Variable:
 Write-Output ok
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-shadowed-set-location-does-not-infer-provider' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function Set-Location { param([string]$Path) Write-Output "shadow:$Path" }
+Set-Location Variable:
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-shadowed-push-location-does-not-infer-provider' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function Push-Location { param([string]$Path) Write-Output "shadow:$Path" }
+Push-Location Variable:
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-module-qualified-set-location-bypasses-shadow' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+function Set-Location { param([string]$Path) Write-Output "shadow:$Path" }
+Microsoft.PowerShell.Management\Set-Location -LiteralPath 'Variable:'
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-module-qualified-push-location-bypasses-shadow' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+function Push-Location { param([string]$Path) Write-Output "shadow:$Path" }
+Microsoft.PowerShell.Management\Push-Location -LiteralPath 'Variable:'
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-other-module-qualified-location-command-has-no-authority' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Other.Module\Set-Location Variable:
 Set-Item -LiteralPath PID -Value 1 -Force
 '@
 

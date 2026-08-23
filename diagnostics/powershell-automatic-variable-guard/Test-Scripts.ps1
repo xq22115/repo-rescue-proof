@@ -731,29 +731,58 @@ function Test-BraintrustVariableProviderPathTargetsAutomaticVariable {
     return $false
 }
 
-function Get-BraintrustStaticLocationTransitionPath {
+function Get-BraintrustStaticLocationTransitionEvidence {
     param(
         [Parameter(Mandatory = $true)]
-        [System.Management.Automation.Language.CommandAst]$CommandAst
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [System.Management.Automation.Language.FunctionDefinitionAst[]]$FunctionDefinitionAsts = @()
     )
 
     $commandName = [string]$CommandAst.GetCommandName()
     if ([string]::IsNullOrWhiteSpace($commandName)) {
         return @()
     }
+
+    # Command precedence matters here. Native Windows 2022/2025 probes on both
+    # Windows PowerShell 5.1 and PowerShell 7 show that a same-name function hides
+    # an unqualified Set-Location/Push-Location call, while the built-in module-
+    # qualified form bypasses that function shadow. Therefore do not treat an
+    # unqualified canonical spelling as immutable cmdlet identity.
     $leafName = $commandName
     $separatorIndex = $leafName.LastIndexOf([char]92)
     if ($separatorIndex -ge 0) {
         $leafName = $leafName.Substring($separatorIndex + 1)
     }
-    # Only canonical location-transition cmdlets are execution authority here.
-    # Aliases (cd/chdir/sl/pushd) are intentionally excluded until alias redefinition
-    # and command-precedence semantics have their own bounded static proof.
     if ($leafName -ine 'Set-Location' -and $leafName -ine 'Push-Location') {
         return @()
     }
 
+    $identityKind = $null
+    if ($commandName -ieq ('Microsoft.PowerShell.Management' + [char]92 + $leafName)) {
+        $identityKind = 'module-qualified-cmdlet'
+    }
+    elseif ($commandName -ieq $leafName) {
+        if (Test-BraintrustBuiltinAliasDefinitelyShadowed -AliasName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts) {
+            $identityKind = 'definitely-function-shadowed'
+        }
+        else {
+            # A profile/import/session can define a function or alias with the same
+            # name before this file executes. Static source alone cannot prove the
+            # effective unqualified command identity, so retain an explicit
+            # ambiguity instead of silently promoting it to cmdlet authority.
+            $identityKind = 'unqualified-command-identity-ambiguous'
+        }
+    }
+    else {
+        # A different module-qualified command with the same leaf name is not the
+        # built-in management cmdlet and therefore has no location-transition
+        # authority in this guard.
+        return @()
+    }
+
     $elements = @($CommandAst.CommandElements)
+    $pathValue = $null
     for ($index = 1; $index -lt $elements.Count; $index++) {
         $element = $elements[$index]
         if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
@@ -772,23 +801,33 @@ function Get-BraintrustStaticLocationTransitionPath {
             $targetAst = $elements[$valueIndex]
         }
         $values = @(Get-BraintrustStaticStringValues -ValueAst $targetAst)
-        if ($values.Count -eq 1) {
-            return ,([string]$values[0])
+        if ($values.Count -ne 1) {
+            return @()
         }
-        return @()
+        $pathValue = [string]$values[0]
+        break
     }
 
-    # Keep positional inference deliberately narrow: command + one static path.
-    if ($elements.Count -eq 2 -and $elements[1] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
-        $values = @(Get-BraintrustStaticStringValues -ValueAst $elements[1])
-        if ($values.Count -eq 1) {
-            return ,([string]$values[0])
+    if ($null -eq $pathValue) {
+        # Keep positional inference deliberately narrow: command + one static path.
+        if ($elements.Count -ne 2 -or $elements[1] -is [System.Management.Automation.Language.CommandParameterAst]) {
+            return @()
         }
+        $values = @(Get-BraintrustStaticStringValues -ValueAst $elements[1])
+        if ($values.Count -ne 1) {
+            return @()
+        }
+        $pathValue = [string]$values[0]
     }
-    return @()
+
+    return ,([pscustomobject]@{
+        Path = $pathValue
+        IdentityKind = $identityKind
+        CommandName = $commandName
+    })
 }
 
-function Test-BraintrustImmediatelyInVariableProviderLocation {
+function Get-BraintrustImmediateVariableProviderLocationState {
     param(
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.CommandAst]$CommandAst,
@@ -796,13 +835,15 @@ function Test-BraintrustImmediatelyInVariableProviderLocation {
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.CommandAst[]]$CommandAsts,
 
+        [System.Management.Automation.Language.FunctionDefinitionAst[]]$FunctionDefinitionAsts = @(),
+
         [Parameter(Mandatory = $true)]
         [string]$SourceText
     )
 
     $commandContainer = Get-BraintrustEnclosingStatementContainer -Ast $CommandAst
     if ($null -eq $commandContainer) {
-        return $false
+        return 'none'
     }
 
     foreach ($candidate in $CommandAsts) {
@@ -813,8 +854,8 @@ function Test-BraintrustImmediatelyInVariableProviderLocation {
         if ($null -eq $candidateContainer -or -not [object]::ReferenceEquals($candidateContainer, $commandContainer)) {
             continue
         }
-        $paths = @(Get-BraintrustStaticLocationTransitionPath -CommandAst $candidate)
-        if ($paths.Count -ne 1) {
+        $evidence = @(Get-BraintrustStaticLocationTransitionEvidence -CommandAst $candidate -FunctionDefinitionAsts $FunctionDefinitionAsts)
+        if ($evidence.Count -ne 1) {
             continue
         }
 
@@ -828,13 +869,24 @@ function Test-BraintrustImmediatelyInVariableProviderLocation {
             continue
         }
 
-        $normalizedLocation = ([string]$paths[0]).Trim()
-        if ($normalizedLocation -match '^(?i:variable):[\\/]?$') {
-            return $true
+        $normalizedLocation = ([string]$evidence[0].Path).Trim()
+        if ($normalizedLocation -notmatch '^(?i:variable):[\\/]?$') {
+            return 'none'
         }
-        return $false
+
+        $identityKind = [string]$evidence[0].IdentityKind
+        if ($identityKind -eq 'module-qualified-cmdlet') {
+            return 'verified-module-qualified-cmdlet'
+        }
+        if ($identityKind -eq 'unqualified-command-identity-ambiguous') {
+            return 'ambiguous-unqualified-command-identity'
+        }
+        # A same-container function that definitely shadows the unqualified
+        # command is positive evidence that this statement did not execute the
+        # built-in location cmdlet. Do not infer a provider transition from it.
+        return 'none'
     }
-    return $false
+    return 'none'
 }
 
 function Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable {
@@ -981,7 +1033,7 @@ foreach ($file in $files) {
             }
         }
 
-        $immediatelyInVariableProviderLocation = Test-BraintrustImmediatelyInVariableProviderLocation -CommandAst $commandAst -CommandAsts @($commandAsts) -SourceText $sourceText
+        $immediateVariableProviderLocationState = Get-BraintrustImmediateVariableProviderLocationState -CommandAst $commandAst -CommandAsts @($commandAsts) -FunctionDefinitionAsts $functionDefinitionAsts -SourceText $sourceText
         foreach ($providerTarget in (Get-BraintrustProviderItemMutationTargets -CommandAst $commandAst -FunctionDefinitionAsts $functionDefinitionAsts)) {
             $targetAst = $providerTarget.TargetAst
             $writeKind = [string]$providerTarget.Kind
@@ -989,11 +1041,19 @@ foreach ($file in $files) {
 
             foreach ($literalPath in (Get-BraintrustStaticStringValues -ValueAst $targetAst)) {
                 $explicitProviderCollision = Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath
-                $currentLocationCollision = (-not $explicitProviderCollision -and $immediatelyInVariableProviderLocation -and
-                    (Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath))
-                if ($explicitProviderCollision -or $currentLocationCollision) {
+                $relativeCurrentLocationTarget = (Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath)
+                $verifiedCurrentLocationCollision = (-not $explicitProviderCollision -and $relativeCurrentLocationTarget -and $immediateVariableProviderLocationState -eq 'verified-module-qualified-cmdlet')
+                $ambiguousCurrentLocationCollision = (-not $explicitProviderCollision -and $relativeCurrentLocationTarget -and $immediateVariableProviderLocationState -eq 'ambiguous-unqualified-command-identity')
+                if ($explicitProviderCollision -or $verifiedCurrentLocationCollision -or $ambiguousCurrentLocationCollision) {
+                    $collisionKind = $writeKind
+                    if ($verifiedCurrentLocationCollision) {
+                        $collisionKind += '-current-location'
+                    }
+                    elseif ($ambiguousCurrentLocationCollision) {
+                        $collisionKind += '-current-location-ambiguous-command-identity'
+                    }
                     $collisions += [pscustomobject]@{
-                        Kind = $(if ($currentLocationCollision) { $writeKind + '-current-location' } else { $writeKind })
+                        Kind = $collisionKind
                         Variable = [string]$literalPath
                         Extent = $targetAst.Extent
                     }
@@ -1003,10 +1063,17 @@ foreach ($file in $files) {
             if ($targetAst -is [System.Management.Automation.Language.VariableExpressionAst]) {
                 foreach ($literalPath in (Get-BraintrustAdjacentStaticStringValuesForVariableTarget -VariableAst $targetAst -CommandAst $commandAst -AssignmentAsts @($assignmentAsts) -SourceText $sourceText)) {
                     $explicitProviderCollision = Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath
-                    $currentLocationCollision = (-not $explicitProviderCollision -and $immediatelyInVariableProviderLocation -and
-                        (Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath))
-                    if ($explicitProviderCollision -or $currentLocationCollision) {
-                        $suffix = if ($currentLocationCollision) { '-current-location-adjacent-constant' } else { '-adjacent-constant' }
+                    $relativeCurrentLocationTarget = (Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath)
+                    $verifiedCurrentLocationCollision = (-not $explicitProviderCollision -and $relativeCurrentLocationTarget -and $immediateVariableProviderLocationState -eq 'verified-module-qualified-cmdlet')
+                    $ambiguousCurrentLocationCollision = (-not $explicitProviderCollision -and $relativeCurrentLocationTarget -and $immediateVariableProviderLocationState -eq 'ambiguous-unqualified-command-identity')
+                    if ($explicitProviderCollision -or $verifiedCurrentLocationCollision -or $ambiguousCurrentLocationCollision) {
+                        $suffix = '-adjacent-constant'
+                        if ($verifiedCurrentLocationCollision) {
+                            $suffix = '-current-location-adjacent-constant'
+                        }
+                        elseif ($ambiguousCurrentLocationCollision) {
+                            $suffix = '-current-location-ambiguous-command-identity-adjacent-constant'
+                        }
                         $collisions += [pscustomobject]@{
                             Kind = ($writeKind + $suffix)
                             Variable = [string]$literalPath
