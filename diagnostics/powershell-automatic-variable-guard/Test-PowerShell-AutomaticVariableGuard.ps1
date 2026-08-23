@@ -440,7 +440,7 @@ Set-Item -LiteralPath 'Variable:\PID' -Value 1 -Force
 Set-Item -LiteralPath 'Variable:global:PID' -Value 1 -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-set-item-wildcard-path' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:P\\*'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-wildcard-path' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:P\*'.*automatic variable" -Content @'
 Set-Item -Path 'Variable:P*' -Value 1 -Force
 '@
 
@@ -452,7 +452,7 @@ si -LiteralPath 'Variable:PID' -Value 1 -Force
 Clear-Item -LiteralPath 'Variable:PID' -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-clear-item-wildcard' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider variable 'Variable:P\\*'.*automatic variable" -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-clear-item-wildcard' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider variable 'Variable:P\*'.*automatic variable" -Content @'
 Clear-Item -Path 'Variable:P*' -Force
 '@
 
