@@ -170,121 +170,88 @@ function Get-BraintrustStaticStringValues {
     return @()
 }
 
-function Get-BraintrustContainingStatementBlock {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Management.Automation.Language.Ast]$Ast
-    )
-
-    $cursor = $Ast
-    while ($null -ne $cursor) {
-        if ($cursor -is [System.Management.Automation.Language.StatementBlockAst]) {
-            return $cursor
-        }
-        $cursor = $cursor.Parent
-    }
-
-    return $null
-}
-
-function Get-BraintrustDirectStatementInBlock {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Management.Automation.Language.Ast]$Ast,
-
-        [Parameter(Mandatory = $true)]
-        [System.Management.Automation.Language.StatementBlockAst]$StatementBlock
-    )
-
-    $cursor = $Ast
-    while ($null -ne $cursor -and $null -ne $cursor.Parent -and -not [object]::ReferenceEquals($cursor.Parent, $StatementBlock)) {
-        $cursor = $cursor.Parent
-    }
-
-    if ($null -eq $cursor -or -not [object]::ReferenceEquals($cursor.Parent, $StatementBlock)) {
-        return $null
-    }
-
-    if ($cursor -is [System.Management.Automation.Language.StatementAst]) {
-        return $cursor
-    }
-
-    return $null
-}
-
 function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
     param(
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.VariableExpressionAst]$VariableAst,
 
         [Parameter(Mandatory = $true)]
-        [System.Management.Automation.Language.CommandAst]$CommandAst
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.AssignmentStatementAst[]]$AssignmentAsts,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceText
     )
 
     # This is deliberately not general data-flow analysis. Resolve only an
-    # unqualified variable whose immediately preceding statement in the same
-    # StatementBlockAst is a plain '=' assignment from one static string.
+    # unqualified variable whose nearest eligible plain '=' assignment appears
+    # immediately before the Set-Variable command in source text. Any intervening
+    # executable syntax, block delimiter, comment, or other statement causes this
+    # helper to decline instead of guessing across control-flow boundaries.
     $variableName = [string]$VariableAst.VariablePath.UserPath
     if ([string]::IsNullOrWhiteSpace($variableName) -or $variableName.Contains(':')) {
         return @()
     }
 
-    $statementBlock = Get-BraintrustContainingStatementBlock -Ast $CommandAst
-    if ($null -eq $statementBlock) {
-        return @()
-    }
+    $candidate = $null
+    foreach ($assignmentAst in $AssignmentAsts) {
+        if ($assignmentAst.Extent.EndOffset -gt $CommandAst.Extent.StartOffset) {
+            continue
+        }
 
-    $commandStatement = Get-BraintrustDirectStatementInBlock -Ast $CommandAst -StatementBlock $statementBlock
-    if ($null -eq $commandStatement) {
-        return @()
-    }
+        if ([string]$assignmentAst.Operator -ne 'Equals') {
+            continue
+        }
 
-    $statements = @($statementBlock.Statements)
-    $commandIndex = -1
-    for ($index = 0; $index -lt $statements.Count; $index++) {
-        if ([object]::ReferenceEquals($statements[$index], $commandStatement)) {
-            $commandIndex = $index
-            break
+        if ($assignmentAst.Left -isnot [System.Management.Automation.Language.VariableExpressionAst]) {
+            continue
+        }
+
+        $assignedName = [string]$assignmentAst.Left.VariablePath.UserPath
+        if ([string]::IsNullOrWhiteSpace($assignedName) -or $assignedName.Contains(':') -or $assignedName -ine $variableName) {
+            continue
+        }
+
+        if ($assignmentAst.Right -isnot [System.Management.Automation.Language.PipelineBaseAst]) {
+            continue
+        }
+
+        $pureExpression = $assignmentAst.Right.GetPureExpression()
+        if ($null -eq $pureExpression) {
+            continue
+        }
+
+        $values = @(Get-BraintrustStaticStringValues -ValueAst $pureExpression)
+        if ($values.Count -ne 1) {
+            continue
+        }
+
+        $gapStart = [int]$assignmentAst.Extent.EndOffset
+        $gapLength = [int]$CommandAst.Extent.StartOffset - $gapStart
+        if ($gapStart -lt 0 -or $gapLength -lt 0 -or ($gapStart + $gapLength) -gt $SourceText.Length) {
+            continue
+        }
+
+        $gap = $SourceText.Substring($gapStart, $gapLength)
+        if ($gap -notmatch '^[\s;]*$') {
+            continue
+        }
+
+        if ($null -eq $candidate -or $assignmentAst.Extent.EndOffset -gt $candidate.Assignment.Extent.EndOffset) {
+            $candidate = [pscustomobject]@{
+                Assignment = $assignmentAst
+                Value = [string]$values[0]
+            }
         }
     }
 
-    if ($commandIndex -le 0) {
+    if ($null -eq $candidate) {
         return @()
     }
 
-    $previousStatement = $statements[$commandIndex - 1]
-    if ($previousStatement -isnot [System.Management.Automation.Language.AssignmentStatementAst]) {
-        return @()
-    }
-
-    if ([string]$previousStatement.Operator -ne 'Equals') {
-        return @()
-    }
-
-    if ($previousStatement.Left -isnot [System.Management.Automation.Language.VariableExpressionAst]) {
-        return @()
-    }
-
-    $assignedName = [string]$previousStatement.Left.VariablePath.UserPath
-    if ([string]::IsNullOrWhiteSpace($assignedName) -or $assignedName.Contains(':') -or $assignedName -ine $variableName) {
-        return @()
-    }
-
-    if ($previousStatement.Right -isnot [System.Management.Automation.Language.PipelineBaseAst]) {
-        return @()
-    }
-
-    $pureExpression = $previousStatement.Right.GetPureExpression()
-    if ($null -eq $pureExpression) {
-        return @()
-    }
-
-    $values = @(Get-BraintrustStaticStringValues -ValueAst $pureExpression)
-    if ($values.Count -ne 1) {
-        return @()
-    }
-
-    return ,([string]$values[0])
+    return ,([string]$candidate.Value)
 }
 
 function Get-BraintrustSetVariableNameTargets {
@@ -360,6 +327,7 @@ if (-not $files) {
 
 $failed = $false
 foreach ($file in $files) {
+    $sourceText = [System.IO.File]::ReadAllText($file.FullName)
     $tokens = $null
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
@@ -460,7 +428,7 @@ foreach ($file in $files) {
             }
 
             if ($targetAst -is [System.Management.Automation.Language.VariableExpressionAst]) {
-                foreach ($literalName in (Get-BraintrustAdjacentStaticStringValuesForVariableTarget -VariableAst $targetAst -CommandAst $commandAst)) {
+                foreach ($literalName in (Get-BraintrustAdjacentStaticStringValuesForVariableTarget -VariableAst $targetAst -CommandAst $commandAst -AssignmentAsts @($assignmentAsts) -SourceText $sourceText)) {
                     if (Test-BraintrustAutomaticVariableNameText -Name $literalName) {
                         $collisions += [pscustomobject]@{
                             Kind = 'set-variable-adjacent-constant'
