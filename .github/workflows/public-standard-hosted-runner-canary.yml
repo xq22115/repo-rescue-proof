@@ -230,8 +230,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
-          if (-not $isWindows) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_NOT_WINDOWS' }
+          $nativeWindowsObserved = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+          if (-not $nativeWindowsObserved) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_NOT_WINDOWS' }
           if ($env:RUNNER_OS -ne 'Windows') { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_RUNNER_OS_MISMATCH' }
           if (-not [Environment]::Is64BitOperatingSystem) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_REQUIRES_64BIT_OS' }
           if ($env:RUNNER_ARCH -notin @('X64', 'ARM64')) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_ARCH_NOT_ACCEPTED' }
