@@ -54,7 +54,22 @@ $hostNameObserved = $Host.Name
 $ordinaryValue = 1
 $leftValue, $rightValue = 1, 2
 foreach ($item in 1..2) { $ordinaryValue += $item }
+$ordinaryValue++
+--$ordinaryValue
+Set-Variable -Name ordinaryValue -Value 3
+$name = 'PID'
+Set-Variable -Name $name -Value 4
+$obj = [pscustomobject]@{ Value = 1 }
+$obj.Value++
 $env:HOME = 'fixture-only'
+'@
+
+    Invoke-BraintrustLintFixture -Name 'shadowed-set-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function set {
+    param($Name, $Value)
+    Write-Output "$Name=$Value"
+}
+set PID 1
 '@
 
     Invoke-BraintrustLintFixture -Name 'case-insensitive-iswindows-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'isWindows'.*automatic variable" -Content @'
@@ -76,6 +91,30 @@ foreach ($error in 1..2) { Write-Output $error }
 
     Invoke-BraintrustLintFixture -Name 'tuple-pid-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'PID'.*automatic variable" -Content @'
 $safeValue, $PID = 1, 2
+'@
+
+    Invoke-BraintrustLintFixture -Name 'prefix-automatic-variable-increment' -ExpectedExitCode 1 -ExpectedOutputPattern "unary-write variable 'pid'.*automatic variable" -Content @'
+++$pid
+'@
+
+    Invoke-BraintrustLintFixture -Name 'postfix-scoped-automatic-variable-decrement' -ExpectedExitCode 1 -ExpectedOutputPattern "unary-write variable 'script:PID'.*automatic variable" -Content @'
+$script:PID--
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-explicit-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+Set-Variable -Name PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-alias-explicit-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'host'.*automatic variable" -Content @'
+sv -Name host -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-alias-positional-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+set PID 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-module-qualified' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'Error'.*automatic variable" -Content @'
+Microsoft.PowerShell.Utility\Set-Variable -Name Error -Value @()
 '@
 }
 finally {
