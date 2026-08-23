@@ -639,3 +639,4 @@ finally {
 }
 
 Write-Host 'PowerShell automatic-variable collision guard regression PASS.' -ForegroundColor Green
+exit 0
