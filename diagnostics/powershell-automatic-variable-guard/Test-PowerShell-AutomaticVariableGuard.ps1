@@ -57,12 +57,13 @@ foreach ($item in 1..2) { $ordinaryValue += $item }
 $ordinaryValue++
 --$ordinaryValue
 Set-Variable -Name ordinaryValue -Value 3
+Set-Variable -N ordinaryValue -Value 4
 $namePart = 'ordinary'
 $name = ($namePart + 'Value')
-Set-Variable -Name $name -Value 4
+Set-Variable -Name $name -Value 5
 $targetName = 'PID'
 $targetName = 'ordinaryValue'
-Set-Variable -Name $targetName -Value 5
+Set-Variable -Name $targetName -Value 6
 $obj = [pscustomobject]@{ Value = 1 }
 $obj.Value++
 $env:HOME = 'fixture-only'
@@ -110,6 +111,11 @@ $name = 'PID'
 Set-Variable -Name $name -Value 1
 '@
 
+    Invoke-BraintrustLintFixture -Name 'set-variable-abbreviated-adjacent-literal-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable-adjacent-constant variable 'PID'.*automatic variable" -Content @'
+$name = 'PID'
+Set-Variable -N $name -Value 1
+'@
+
     Invoke-BraintrustLintFixture -Name 'set-variable-alias-adjacent-literal-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable-adjacent-constant variable 'host'.*automatic variable" -Content @'
 $name = 'host'
 sv -Name $name -Value 1
@@ -130,6 +136,18 @@ Set-Variable -Name $name -Value 1
 Set-Variable -Name PID -Value 1
 '@
 
+    Invoke-BraintrustLintFixture -Name 'set-variable-abbreviated-n-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+Set-Variable -N PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-abbreviated-na-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'host'.*automatic variable" -Content @'
+Set-Variable -Na host -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-alias-abbreviated-nam-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'Error'.*automatic variable" -Content @'
+sv -Nam Error -Value @()
+'@
+
     Invoke-BraintrustLintFixture -Name 'set-variable-alias-explicit-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'host'.*automatic variable" -Content @'
 sv -Name host -Value 1
 '@
@@ -140,6 +158,10 @@ set PID 1
 
     Invoke-BraintrustLintFixture -Name 'set-variable-module-qualified' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'Error'.*automatic variable" -Content @'
 Microsoft.PowerShell.Utility\Set-Variable -Name Error -Value @()
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-module-qualified-abbreviated-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'Error'.*automatic variable" -Content @'
+Microsoft.PowerShell.Utility\Set-Variable -Nam Error -Value @()
 '@
 }
 finally {
