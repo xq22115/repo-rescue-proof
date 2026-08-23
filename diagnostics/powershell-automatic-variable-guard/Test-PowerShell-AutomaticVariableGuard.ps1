@@ -482,6 +482,46 @@ function si { param($LiteralPath, $Value) Write-Output $LiteralPath }
 si -LiteralPath 'Variable:PID' -Value 1
 '@
 
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-ordinary-variable' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Location Variable:
+Set-Item -LiteralPath ordinaryProviderTarget -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+Set-Location Variable:
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+Set-Location -Path 'Variable:'; Clear-Item -LiteralPath PID -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-remove-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-item-variable-provider-current-location variable 'PID'.*automatic variable" -Content @'
+Microsoft.PowerShell.Management\Set-Location -LiteralPath 'Variable:'
+Remove-Item -LiteralPath PID -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-wildcard' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-current-location variable 'P\*'.*automatic variable" -Content @'
+Set-Location Variable:
+Set-Item -Path 'P*' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-literal-wildcard-remains-literal' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Location Variable:
+Set-Item -LiteralPath 'P*' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-non-variable-location' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Location .
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-current-location-intervening-statement-declines-inference' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Location Variable:
+Write-Output ok
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
     Invoke-BraintrustLintFixture -Name 'shadowed-clv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
 function clv { param($Name) Write-Output $Name }
 clv PID
