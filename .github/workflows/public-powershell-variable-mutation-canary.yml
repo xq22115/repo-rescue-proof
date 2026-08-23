@@ -1,0 +1,94 @@
+name: Public PowerShell Variable Mutation Canary
+
+on:
+  push:
+    branches:
+      - diagnostics/public-standard-hosted-runner-canary-20260822
+    paths:
+      - '.github/workflows/public-powershell-variable-mutation-canary.yml'
+      - 'diagnostics/powershell-variable-mutation-canary/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-2022:
+    name: windows-2022 variable mutation canary
+    runs-on: windows-2022
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "MUTATION_CANARY_HEAD_MISMATCH expected=$env:EXPECTED_SHA actual=$actual" }
+
+      - name: Probe Windows PowerShell 5.1 mutation behavior
+        shell: powershell
+        run: |
+          .\diagnostics\powershell-variable-mutation-canary\Invoke-VariableMutationProbe.ps1 `
+            -OutputPath .\mutation-evidence\windows-2022-powershell-5.1.json `
+            -RunnerImage 'windows-2022'
+
+      - name: Probe PowerShell 7 mutation behavior
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-mutation-canary\Invoke-VariableMutationProbe.ps1 `
+            -OutputPath .\mutation-evidence\windows-2022-powershell-7.json `
+            -RunnerImage 'windows-2022'
+
+      - name: Upload Windows 2022 mutation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: powershell-variable-mutation-windows-2022-${{ github.run_id }}
+          path: mutation-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-latest:
+    name: windows-latest variable mutation canary
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "MUTATION_CANARY_HEAD_MISMATCH expected=$env:EXPECTED_SHA actual=$actual" }
+
+      - name: Probe Windows PowerShell 5.1 mutation behavior
+        shell: powershell
+        run: |
+          .\diagnostics\powershell-variable-mutation-canary\Invoke-VariableMutationProbe.ps1 `
+            -OutputPath .\mutation-evidence\windows-latest-powershell-5.1.json `
+            -RunnerImage 'windows-latest'
+
+      - name: Probe PowerShell 7 mutation behavior
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-mutation-canary\Invoke-VariableMutationProbe.ps1 `
+            -OutputPath .\mutation-evidence\windows-latest-powershell-7.json `
+            -RunnerImage 'windows-latest'
+
+      - name: Upload Windows latest mutation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: powershell-variable-mutation-windows-latest-${{ github.run_id }}
+          path: mutation-evidence/
+          if-no-files-found: error
+          retention-days: 14
