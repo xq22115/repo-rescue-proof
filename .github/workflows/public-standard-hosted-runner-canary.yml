@@ -221,3 +221,185 @@ jobs:
           path: trusted-builder-canary/
           if-no-files-found: error
           retention-days: 14
+
+  github-hosted-windows-trusted-builder:
+    name: windows-latest trusted-builder attestation canary
+    runs-on: windows-latest
+    steps:
+      - name: Mark native Windows trusted builder started
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+          if (-not $isWindows) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_NOT_WINDOWS' }
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_RUNNER_OS_MISMATCH' }
+          if (-not [Environment]::Is64BitOperatingSystem) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_REQUIRES_64BIT_OS' }
+          if ($env:RUNNER_ARCH -notin @('X64', 'ARM64')) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_ARCH_NOT_ACCEPTED' }
+          Write-Output 'runner_started=true'
+          Write-Output "runner_os=$env:RUNNER_OS"
+          Write-Output "runner_arch=$env:RUNNER_ARCH"
+          Write-Output "os_version=$([Environment]::OSVersion.VersionString)"
+          Write-Output "pwsh_version=$($PSVersionTable.PSVersion)"
+
+      - name: Create public Windows diagnostic subject
+        id: windows_subject
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD 'windows-trusted-builder-canary'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $subjectPath = Join-Path $dir 'subject.json'
+          $subject = [ordered]@{
+            component = 'public-windows-github-hosted-trusted-builder-canary-subject'
+            schemaVersion = 1
+            repository = 'xq22115/repo-rescue-proof'
+            sourceSha = $env:SOURCE_SHA
+            workflowRunId = [Int64]$env:RUN_ID
+            workflowRunAttempt = [Int32]$env:RUN_ATTEMPT
+            platformObservation = [ordered]@{
+              runnerOs = $env:RUNNER_OS
+              runnerArch = $env:RUNNER_ARCH
+              osVersion = [Environment]::OSVersion.VersionString
+              powershellEdition = $PSVersionTable.PSEdition
+              powershellVersion = $PSVersionTable.PSVersion.ToString()
+              is64BitOperatingSystem = [Environment]::Is64BitOperatingSystem
+            }
+            acceptanceBoundary = [ordered]@{
+              diagnosticOnly = $true
+              nativeWindowsGithubHostedBuilderObserved = $true
+              privateBraintrustEvidenceIncluded = $false
+              privateBraintrustTrustedBuilderAccepted = $false
+              portableWindowsContractAccepted = $false
+              targetWindowsOdrAccepted = $false
+              mcpSemanticToolAccepted = $false
+              windowsFinalStateAccepted = $false
+            }
+          }
+          $json = $subject | ConvertTo-Json -Depth 12
+          [IO.File]::WriteAllText($subjectPath, $json + "`n", [Text.UTF8Encoding]::new($false))
+          $subjectSha = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $dir 'SHA256SUMS'), "$subjectSha  subject.json`n", [Text.UTF8Encoding]::new($false))
+          "subject_sha256=$subjectSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Generate Windows GitHub/Sigstore attestation
+        id: attest_windows_subject
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: windows-trusted-builder-canary/subject.json
+
+      - name: Verify Windows GitHub-hosted trusted-builder policy
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE_PATH: ${{ steps.attest_windows_subject.outputs.bundle-path }}
+          SOURCE_SHA: ${{ github.sha }}
+          SUBJECT_SHA256: ${{ steps.windows_subject.outputs.subject_sha256 }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:ATTESTATION_BUNDLE_PATH)) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_ATTESTATION_PATH_MISSING' }
+          if (-not (Test-Path -LiteralPath $env:ATTESTATION_BUNDLE_PATH -PathType Leaf)) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_ATTESTATION_FILE_MISSING' }
+          $dir = Join-Path $PWD 'windows-trusted-builder-canary'
+          $subjectPath = Join-Path $dir 'subject.json'
+          $bundlePath = Join-Path $dir 'attestation.sigstore.json'
+          $verificationPath = Join-Path $dir 'verification.json'
+          Copy-Item -LiteralPath $env:ATTESTATION_BUNDLE_PATH -Destination $bundlePath -Force
+
+          & gh attestation verify `
+            $subjectPath `
+            --repo xq22115/repo-rescue-proof `
+            --bundle $bundlePath `
+            --signer-workflow 'xq22115/repo-rescue-proof/.github/workflows/public-standard-hosted-runner-canary.yml' `
+            --source-digest $env:SOURCE_SHA `
+            --deny-self-hosted-runners `
+            --format json `
+            | Out-File -LiteralPath $verificationPath -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "WINDOWS_TRUSTED_BUILDER_CANARY_VERIFY_FAILED exit=$LASTEXITCODE" }
+
+          $verification = Get-Content -LiteralPath $verificationPath -Raw | ConvertFrom-Json
+          $entries = @($verification)
+          if ($entries.Count -ne 1) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_EXPECTED_ONE_VERIFICATION_ENTRY' }
+          $result = $entries[0].verificationResult
+          if ($null -eq $result) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_VERIFICATION_RESULT_MISSING' }
+          $certificate = $result.signature.certificate
+          if ($null -eq $certificate) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_CERTIFICATE_MISSING' }
+          $subjects = @($result.statement.subject)
+          if ($subjects.Count -ne 1) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_SUBJECT_COUNT_INVALID' }
+          $verifiedSubjectSha = ([string]$subjects[0].digest.sha256).ToLowerInvariant()
+          $expectedSubjectSha = $env:SUBJECT_SHA256.ToLowerInvariant()
+          $observedSubjectSha = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($observedSubjectSha -ne $expectedSubjectSha -or $verifiedSubjectSha -ne $expectedSubjectSha) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_SUBJECT_SHA_MISMATCH' }
+          if ([string]$certificate.runnerEnvironment -ne 'github-hosted') { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_NOT_GITHUB_HOSTED' }
+          if ([string]$certificate.sourceRepositoryURI -ne 'https://github.com/xq22115/repo-rescue-proof') { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_REPOSITORY_MISMATCH' }
+          $sourceDigest = ([string]$certificate.sourceRepositoryDigest).ToLowerInvariant()
+          if ($sourceDigest -ne $env:SOURCE_SHA.ToLowerInvariant()) { throw 'WINDOWS_TRUSTED_BUILDER_CANARY_SOURCE_SHA_MISMATCH' }
+
+          $receipt = [ordered]@{
+            component = 'public-windows-github-hosted-trusted-builder-attestation-canary'
+            schemaVersion = 1
+            repository = 'xq22115/repo-rescue-proof'
+            subject = [ordered]@{ sha256 = $expectedSubjectSha }
+            producer = [ordered]@{
+              sourceSha = $env:SOURCE_SHA.ToLowerInvariant()
+              workflowRunId = [Int64]$env:RUN_ID
+              workflowRunAttempt = [Int32]$env:RUN_ATTEMPT
+            }
+            platformEvidence = [ordered]@{
+              runnerOs = $env:RUNNER_OS
+              runnerArch = $env:RUNNER_ARCH
+              osVersion = [Environment]::OSVersion.VersionString
+              powershellEdition = $PSVersionTable.PSEdition
+              powershellVersion = $PSVersionTable.PSVersion.ToString()
+              nativeWindowsObserved = $true
+              is64BitOperatingSystem = [Environment]::Is64BitOperatingSystem
+            }
+            certificateEvidence = [ordered]@{
+              runnerEnvironment = 'github-hosted'
+              sourceRepositoryURI = [string]$certificate.sourceRepositoryURI
+              sourceRepositoryDigest = $sourceDigest
+              buildSignerDigest = [string]$certificate.buildSignerDigest
+              buildConfigDigest = [string]$certificate.buildConfigDigest
+              buildTrigger = [string]$certificate.buildTrigger
+              runInvocationURI = [string]$certificate.runInvocationURI
+              sourceRepositoryVisibilityAtSigning = [string]$certificate.sourceRepositoryVisibilityAtSigning
+            }
+            policy = [ordered]@{
+              name = 'github-cli-deny-self-hosted-runners'
+              denySelfHostedRunnersRequested = $true
+              denySelfHostedVerificationAccepted = $true
+            }
+            acceptanceBoundary = [ordered]@{
+              artifactWorkflowProvenanceVerified = $true
+              githubHostedBuilderObserved = $true
+              nativeWindowsGithubHostedBuilderObserved = $true
+              trustedBuilderPolicyAccepted = $true
+              diagnosticOnly = $true
+              artifactSecurityAccepted = $false
+              privateBraintrustTrustedBuilderAccepted = $false
+              portableWindowsContractAccepted = $false
+              targetWindowsOdrAccepted = $false
+              mcpSemanticToolAccepted = $false
+              windowsFinalStateAccepted = $false
+            }
+          }
+          $receiptPath = Join-Path $dir 'trusted-builder-canary-receipt.json'
+          [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 12) + "`n", [Text.UTF8Encoding]::new($false))
+          $lines = @(
+            "$( (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.ToLowerInvariant() )  attestation.sigstore.json",
+            "$( (Get-FileHash -LiteralPath $verificationPath -Algorithm SHA256).Hash.ToLowerInvariant() )  verification.json",
+            "$( (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash.ToLowerInvariant() )  trusted-builder-canary-receipt.json"
+          )
+          Add-Content -LiteralPath (Join-Path $dir 'SHA256SUMS') -Value ($lines -join "`n") -Encoding utf8
+
+      - name: Upload Windows trusted-builder canary evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-windows-github-hosted-trusted-builder-canary-${{ github.run_id }}
+          path: windows-trusted-builder-canary/
+          if-no-files-found: error
+          retention-days: 14
