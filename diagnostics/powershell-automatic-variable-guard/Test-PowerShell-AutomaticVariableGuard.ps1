@@ -57,8 +57,12 @@ foreach ($item in 1..2) { $ordinaryValue += $item }
 $ordinaryValue++
 --$ordinaryValue
 Set-Variable -Name ordinaryValue -Value 3
-$name = 'PID'
+$namePart = 'ordinary'
+$name = ($namePart + 'Value')
 Set-Variable -Name $name -Value 4
+$targetName = 'PID'
+$targetName = 'ordinaryValue'
+Set-Variable -Name $targetName -Value 5
 $obj = [pscustomobject]@{ Value = 1 }
 $obj.Value++
 $env:HOME = 'fixture-only'
@@ -99,6 +103,27 @@ $safeValue, $PID = 1, 2
 
     Invoke-BraintrustLintFixture -Name 'postfix-scoped-automatic-variable-decrement' -ExpectedExitCode 1 -ExpectedOutputPattern "unary-write variable 'script:PID'.*automatic variable" -Content @'
 $script:PID--
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-adjacent-literal-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable-adjacent-constant variable 'PID'.*automatic variable" -Content @'
+$name = 'PID'
+Set-Variable -Name $name -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-alias-adjacent-literal-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable-adjacent-constant variable 'host'.*automatic variable" -Content @'
+$name = 'host'
+sv -Name $name -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-adjacent-ordinary-name' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+$name = 'ordinaryValue'
+Set-Variable -Name $name -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-nonliteral-name-remains-unresolved' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+$prefix = 'P'
+$name = ($prefix + 'ID')
+Set-Variable -Name $name -Value 1
 '@
 
     Invoke-BraintrustLintFixture -Name 'set-variable-explicit-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
