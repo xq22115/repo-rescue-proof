@@ -56,29 +56,51 @@ $ErrorActionPreference = "Stop"
     'true'
 )
 
+function Get-BraintrustUnqualifiedVariableNameFromText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    $scopeMatch = [regex]::Match($Name, '^(?i:global|script|local|private):(.+)$')
+    if ($scopeMatch.Success) {
+        return $scopeMatch.Groups[1].Value
+    }
+
+    # Provider-qualified names such as env:PATH are not ordinary variable bindings
+    # and are intentionally outside this automatic-variable guard.
+    if ($Name.Contains(':')) {
+        return $null
+    }
+
+    return $Name
+}
+
 function Get-BraintrustUnqualifiedVariableName {
     param(
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.VariableExpressionAst]$VariableAst
     )
 
-    $name = [string]$VariableAst.VariablePath.UserPath
-    if ([string]::IsNullOrWhiteSpace($name)) {
-        return $null
+    return Get-BraintrustUnqualifiedVariableNameFromText -Name ([string]$VariableAst.VariablePath.UserPath)
+}
+
+function Test-BraintrustAutomaticVariableNameText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $unqualified = Get-BraintrustUnqualifiedVariableNameFromText -Name $Name
+    if ($null -eq $unqualified) {
+        return $false
     }
 
-    $scopeMatch = [regex]::Match($name, '^(?i:global|script|local|private):(.+)$')
-    if ($scopeMatch.Success) {
-        return $scopeMatch.Groups[1].Value
-    }
-
-    # Provider-qualified paths such as env:PATH are not ordinary variables and
-    # are intentionally outside this automatic-variable guard.
-    if ($name.Contains(':')) {
-        return $null
-    }
-
-    return $name
+    return ($automaticVariableNames -contains $unqualified)
 }
 
 function Test-BraintrustAutomaticVariableCollision {
@@ -120,6 +142,100 @@ function Get-BraintrustDirectAssignmentVariables {
     return @()
 }
 
+function Get-BraintrustStaticStringValues {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.Ast]$ValueAst
+    )
+
+    if ($ValueAst -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+        return ,([string]$ValueAst.Value)
+    }
+
+    if ($ValueAst -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+        if ($ValueAst.NestedExpressions.Count -eq 0) {
+            return ,([string]$ValueAst.Value)
+        }
+        return @()
+    }
+
+    if ($ValueAst -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+        $values = @()
+        foreach ($element in $ValueAst.Elements) {
+            $values += @(Get-BraintrustStaticStringValues -ValueAst $element)
+        }
+        return $values
+    }
+
+    return @()
+}
+
+function Get-BraintrustSetVariableNameTargets {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [string[]]$DefinedFunctionNames = @()
+    )
+
+    $commandName = [string]$CommandAst.GetCommandName()
+    if ([string]::IsNullOrWhiteSpace($commandName)) {
+        return @()
+    }
+
+    $leafName = $commandName
+    $separatorIndex = $leafName.LastIndexOf('\')
+    if ($separatorIndex -ge 0) {
+        $leafName = $leafName.Substring($separatorIndex + 1)
+    }
+
+    $isCanonicalCommand = $leafName -ieq 'Set-Variable'
+    $isBuiltinAlias = $leafName -ieq 'set' -or $leafName -ieq 'sv'
+    if (-not $isCanonicalCommand -and -not $isBuiltinAlias) {
+        return @()
+    }
+
+    # A locally-defined function named set/sv shadows the built-in alias. Do not
+    # reinterpret that function call as Set-Variable. Dynamic Set-Alias shadowing
+    # remains outside this small dependency-free static guard.
+    if ($isBuiltinAlias -and ($DefinedFunctionNames -contains $leafName)) {
+        return @()
+    }
+
+    $elements = @($CommandAst.CommandElements)
+    $targets = @()
+    for ($index = 1; $index -lt $elements.Count; $index++) {
+        $element = $elements[$index]
+        if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+            continue
+        }
+
+        if ($element.ParameterName -ine 'Name') {
+            continue
+        }
+
+        if ($null -ne $element.Argument) {
+            $targets += $element.Argument
+            continue
+        }
+
+        $valueIndex = $index + 1
+        if ($valueIndex -lt $elements.Count -and $elements[$valueIndex] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+            $targets += $elements[$valueIndex]
+            $index = $valueIndex
+        }
+    }
+
+    if ($targets.Count -eq 0 -and $elements.Count -gt 1 -and $elements[1] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+        # Only the unambiguous first positional argument is interpreted as -Name.
+        # Once another parameter precedes it, parameter binding can be ambiguous and
+        # this lightweight guard declines to guess.
+        $targets += $elements[1]
+    }
+
+    return $targets
+}
+
 $files = Get-ChildItem -Path $Root -Filter "*.ps1" -File | Where-Object { $_.Name -ne "Test-Scripts.ps1" }
 if (-not $files) {
     throw "No PowerShell scripts found under $Root"
@@ -141,6 +257,10 @@ foreach ($file in $files) {
     }
 
     $collisions = @()
+    $definedFunctionNames = @($ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+    }, $true) | ForEach-Object { [string]$_.Name })
 
     $parameterAsts = $ast.FindAll({
         param($node)
@@ -182,6 +302,44 @@ foreach ($file in $files) {
                 Kind = 'foreach-variable'
                 Variable = [string]$forEachAst.Variable.VariablePath.UserPath
                 Extent = $forEachAst.Variable.Extent
+            }
+        }
+    }
+
+    $unaryAsts = $ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.UnaryExpressionAst]
+    }, $true)
+    foreach ($unaryAst in $unaryAsts) {
+        $tokenKind = [string]$unaryAst.TokenKind
+        if ($tokenKind -notin @('PlusPlus', 'MinusMinus', 'PostfixPlusPlus', 'PostfixMinusMinus')) {
+            continue
+        }
+
+        if ($unaryAst.Child -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            (Test-BraintrustAutomaticVariableCollision -VariableAst $unaryAst.Child)) {
+            $collisions += [pscustomobject]@{
+                Kind = 'unary-write'
+                Variable = [string]$unaryAst.Child.VariablePath.UserPath
+                Extent = $unaryAst.Child.Extent
+            }
+        }
+    }
+
+    $commandAsts = $ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.CommandAst]
+    }, $true)
+    foreach ($commandAst in $commandAsts) {
+        foreach ($targetAst in (Get-BraintrustSetVariableNameTargets -CommandAst $commandAst -DefinedFunctionNames $definedFunctionNames)) {
+            foreach ($literalName in (Get-BraintrustStaticStringValues -ValueAst $targetAst)) {
+                if (Test-BraintrustAutomaticVariableNameText -Name $literalName) {
+                    $collisions += [pscustomobject]@{
+                        Kind = 'set-variable'
+                        Variable = [string]$literalName
+                        Extent = $targetAst.Extent
+                    }
+                }
             }
         }
     }
