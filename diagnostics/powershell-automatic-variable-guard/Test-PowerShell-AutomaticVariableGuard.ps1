@@ -71,6 +71,61 @@ finally {
     Remove-Variable -Name $runtimePrefixProbeN, $runtimePrefixProbeNa, $runtimePrefixProbeNam -Force -ErrorAction SilentlyContinue
 }
 
+# Native behavior probe: named parameters may precede mandatory position-0 Name.
+$runtimeSetLeadingForceProbe = 'BraintrustSetLeadingForceProbe'
+$runtimeSetLeadingErrorActionProbe = 'BraintrustSetLeadingErrorActionProbe'
+try {
+    Set-Variable -Force $runtimeSetLeadingForceProbe -Value 'set-force-leading'
+    Set-Variable -ErrorAction Stop $runtimeSetLeadingErrorActionProbe -Value 'set-erroraction-leading'
+    if ((Get-Variable -Name $runtimeSetLeadingForceProbe -ValueOnly) -ne 'set-force-leading') { throw 'Set-Variable positional Name after -Force failed.' }
+    if ((Get-Variable -Name $runtimeSetLeadingErrorActionProbe -ValueOnly) -ne 'set-erroraction-leading') { throw 'Set-Variable positional Name after -ErrorAction failed.' }
+}
+finally {
+    Remove-Variable -Name $runtimeSetLeadingForceProbe, $runtimeSetLeadingErrorActionProbe -Force -ErrorAction SilentlyContinue
+}
+
+# Native behavior probe: New-Variable shares the same unique -Name prefix surface,
+# and -Force can replace an existing ReadOnly variable. Prove those semantics on an
+# ordinary isolated variable before relying on the static New-Variable write guard.
+$runtimeNewPrefixProbeN = 'BraintrustNewPrefixProbeN'
+$runtimeNewPrefixProbeNa = 'BraintrustNewPrefixProbeNa'
+$runtimeNewPrefixProbeNam = 'BraintrustNewPrefixProbeNam'
+$runtimeNewAliasProbe = 'BraintrustNewAliasProbe'
+$runtimeReadOnlyProbe = 'BraintrustNewForceReadOnlyProbe'
+$runtimeNewLeadingForceProbe = 'BraintrustNewLeadingForceProbe'
+$runtimeNewLeadingErrorActionProbe = 'BraintrustNewLeadingErrorActionProbe'
+try {
+    New-Variable -N $runtimeNewPrefixProbeN -Value 'N-created'
+    New-Variable -Na $runtimeNewPrefixProbeNa -Value 'Na-created'
+    New-Variable -Nam $runtimeNewPrefixProbeNam -Value 'Nam-created'
+    nv -Nam $runtimeNewAliasProbe -Value 'nv-created'
+    New-Variable -Name $runtimeReadOnlyProbe -Value 'original' -Option ReadOnly
+    New-Variable -N $runtimeReadOnlyProbe -Value 'replaced' -Force
+    New-Variable -Force $runtimeNewLeadingForceProbe -Value 'new-force-leading'
+    New-Variable -ErrorAction Stop $runtimeNewLeadingErrorActionProbe -Value 'new-erroraction-leading'
+
+    if ((Get-Variable -Name $runtimeNewPrefixProbeN -ValueOnly) -ne 'N-created') {
+        throw 'New-Variable -N did not bind to -Name in the current PowerShell runtime.'
+    }
+    if ((Get-Variable -Name $runtimeNewPrefixProbeNa -ValueOnly) -ne 'Na-created') {
+        throw 'New-Variable -Na did not bind to -Name in the current PowerShell runtime.'
+    }
+    if ((Get-Variable -Name $runtimeNewPrefixProbeNam -ValueOnly) -ne 'Nam-created') {
+        throw 'New-Variable -Nam did not bind to -Name in the current PowerShell runtime.'
+    }
+    if ((Get-Variable -Name $runtimeNewAliasProbe -ValueOnly) -ne 'nv-created') {
+        throw 'The built-in nv alias did not resolve to New-Variable in the current PowerShell runtime.'
+    }
+    if ((Get-Variable -Name $runtimeReadOnlyProbe -ValueOnly) -ne 'replaced') {
+        throw 'New-Variable -Force did not replace the current ReadOnly probe variable.'
+    }
+    if ((Get-Variable -Name $runtimeNewLeadingForceProbe -ValueOnly) -ne 'new-force-leading') { throw 'New-Variable positional Name after -Force failed.' }
+    if ((Get-Variable -Name $runtimeNewLeadingErrorActionProbe -ValueOnly) -ne 'new-erroraction-leading') { throw 'New-Variable positional Name after -ErrorAction failed.' }
+}
+finally {
+    Remove-Variable -Name $runtimeNewPrefixProbeN, $runtimeNewPrefixProbeNa, $runtimeNewPrefixProbeNam, $runtimeNewAliasProbe, $runtimeReadOnlyProbe, $runtimeNewLeadingForceProbe, $runtimeNewLeadingErrorActionProbe -Force -ErrorAction SilentlyContinue
+}
+
 try {
     Invoke-BraintrustLintFixture -Name 'safe-reads-and-ordinary-writes' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
 $nativeWindowsObserved = $IsWindows
@@ -83,6 +138,8 @@ $ordinaryValue++
 --$ordinaryValue
 Set-Variable -Name ordinaryValue -Value 3
 Set-Variable -N ordinaryValue -Value 4
+New-Variable -Name ordinaryCreatedValue -Value 7
+nv -N ordinaryAliasCreatedValue -Value 8
 $namePart = 'ordinary'
 $name = ($namePart + 'Value')
 Set-Variable -Name $name -Value 5
@@ -100,6 +157,14 @@ function set {
     Write-Output "$Name=$Value"
 }
 set PID 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'shadowed-nv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function nv {
+    param($Name, $Value)
+    Write-Output "$Name=$Value"
+}
+nv PID 1
 '@
 
     Invoke-BraintrustLintFixture -Name 'case-insensitive-iswindows-assignment' -ExpectedExitCode 1 -ExpectedOutputPattern "assignment variable 'isWindows'.*automatic variable" -Content @'
@@ -187,6 +252,53 @@ Microsoft.PowerShell.Utility\Set-Variable -Name Error -Value @()
 
     Invoke-BraintrustLintFixture -Name 'set-variable-module-qualified-abbreviated-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'Error'.*automatic variable" -Content @'
 Microsoft.PowerShell.Utility\Set-Variable -Nam Error -Value @()
+'@
+
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-leading-force-positional-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+Set-Variable -Force PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'set-variable-leading-erroraction-positional-name' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'host'.*automatic variable" -Content @'
+Set-Variable -ErrorAction Stop host -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-adjacent-literal-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable-adjacent-constant variable 'PID'.*automatic variable" -Content @'
+$name = 'PID'
+New-Variable -N $name -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-adjacent-ordinary-name' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+$name = 'ordinaryCreatedValue'
+New-Variable -Name $name -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-explicit-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'PID'.*automatic variable" -Content @'
+New-Variable -Name PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-leading-force-positional-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'PID'.*automatic variable" -Content @'
+New-Variable -Force PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-leading-erroraction-positional-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'host'.*automatic variable" -Content @'
+New-Variable -ErrorAction Stop host -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-abbreviated-n-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'host'.*automatic variable" -Content @'
+New-Variable -N host -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-alias-abbreviated-nam-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'Error'.*automatic variable" -Content @'
+nv -Nam Error -Value @() -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-positional-name' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'PID'.*automatic variable" -Content @'
+New-Variable PID 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'new-variable-module-qualified' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'Error'.*automatic variable" -Content @'
+Microsoft.PowerShell.Utility\New-Variable -Name Error -Value @() -Force
 '@
 }
 finally {

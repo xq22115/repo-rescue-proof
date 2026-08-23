@@ -187,7 +187,7 @@ function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
 
     # This is deliberately not general data-flow analysis. Resolve only an
     # unqualified variable whose nearest eligible plain '=' assignment appears
-    # immediately before the Set-Variable command in source text. Any intervening
+    # immediately before the variable-name command in source text. Any intervening
     # executable syntax, block delimiter, comment, or other statement causes this
     # helper to decline instead of guessing across control-flow boundaries.
     $variableName = [string]$VariableAst.VariablePath.UserPath
@@ -260,24 +260,59 @@ function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
     return ,([string]$candidate.Value)
 }
 
-function Test-BraintrustSetVariableNameParameterPrefix {
+function Get-BraintrustVariableCommandParameterSpec {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$ParameterName
+        [ValidateSet('Set-Variable', 'New-Variable')]
+        [string]$CommandName
     )
 
-    # PowerShell accepts unique parameter-name prefixes. For the current
-    # Set-Variable parameter surface, Name is the only parameter beginning with N,
-    # so N/Na/Nam/Name all bind to -Name. Keep this bounded to literal static
-    # prefixes rather than attempting dynamic parameter binding.
-    if ([string]::IsNullOrWhiteSpace($ParameterName) -or $ParameterName.Length -gt 4) {
-        return $false
+    # Keep this deliberately bounded to the static parameter surface needed to
+    # locate positional -Name arguments for these two cmdlets. The switch/value
+    # distinction lets the guard recognize forms such as `New-Variable -Force PID`
+    # without trying to become a general PowerShell parameter binder.
+    $switches = @('Force', 'PassThru', 'WhatIf', 'Confirm', 'Verbose', 'Debug')
+    $values = @(
+        'Name', 'Value', 'Description', 'Option', 'Visibility', 'Scope',
+        'ErrorAction', 'ErrorVariable', 'WarningAction', 'WarningVariable',
+        'InformationAction', 'InformationVariable', 'OutVariable', 'OutBuffer',
+        'PipelineVariable', 'ProgressAction'
+    )
+    if ($CommandName -eq 'Set-Variable') {
+        $values += @('Include', 'Exclude')
     }
 
-    return ('Name'.Substring(0, $ParameterName.Length) -ieq $ParameterName)
+    $result = @()
+    foreach ($name in $switches) {
+        $result += [pscustomobject]@{ Name = $name; IsSwitch = $true }
+    }
+    foreach ($name in $values) {
+        $result += [pscustomobject]@{ Name = $name; IsSwitch = $false }
+    }
+    return $result
 }
 
-function Get-BraintrustSetVariableNameTargets {
+function Resolve-BraintrustVariableCommandParameter {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ParameterName,
+
+        [Parameter(Mandatory = $true)]
+        [object[]]$ParameterSpec
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ParameterName)) {
+        return $null
+    }
+
+    $matches = @($ParameterSpec | Where-Object { $_.Name.StartsWith($ParameterName, [System.StringComparison]::OrdinalIgnoreCase) })
+    if ($matches.Count -ne 1) {
+        return $null
+    }
+    return $matches[0]
+}
+
+function Get-BraintrustVariableNameWriteTargets {
     param(
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.CommandAst]$CommandAst,
@@ -291,36 +326,61 @@ function Get-BraintrustSetVariableNameTargets {
     }
 
     $leafName = $commandName
-    $separatorIndex = $leafName.LastIndexOf('\')
+    $separatorIndex = $leafName.LastIndexOf([char]92)
     if ($separatorIndex -ge 0) {
         $leafName = $leafName.Substring($separatorIndex + 1)
     }
 
-    $isCanonicalCommand = $leafName -ieq 'Set-Variable'
-    $isBuiltinAlias = $leafName -ieq 'set' -or $leafName -ieq 'sv'
-    if (-not $isCanonicalCommand -and -not $isBuiltinAlias) {
+    $canonicalCommand = $null
+    $writeKind = $null
+    $isBuiltinAlias = $false
+    if ($leafName -ieq 'Set-Variable') {
+        $canonicalCommand = 'Set-Variable'
+        $writeKind = 'set-variable'
+    }
+    elseif ($leafName -ieq 'set' -or $leafName -ieq 'sv') {
+        $canonicalCommand = 'Set-Variable'
+        $writeKind = 'set-variable'
+        $isBuiltinAlias = $true
+    }
+    elseif ($leafName -ieq 'New-Variable') {
+        $canonicalCommand = 'New-Variable'
+        $writeKind = 'new-variable'
+    }
+    elseif ($leafName -ieq 'nv') {
+        $canonicalCommand = 'New-Variable'
+        $writeKind = 'new-variable'
+        $isBuiltinAlias = $true
+    }
+    else {
         return @()
     }
 
-    # A locally-defined function named set/sv shadows the built-in alias. Do not
-    # reinterpret that function call as Set-Variable. Dynamic Set-Alias shadowing
-    # remains outside this small dependency-free static guard.
+    # Locally-defined functions can shadow built-in aliases such as set/sv/nv. Do
+    # not reinterpret those function calls as variable cmdlets. Dynamic Set-Alias
+    # shadowing remains outside this small dependency-free static guard.
     if ($isBuiltinAlias -and ($DefinedFunctionNames -contains $leafName)) {
         return @()
     }
 
     $elements = @($CommandAst.CommandElements)
+    $parameterSpec = @(Get-BraintrustVariableCommandParameterSpec -CommandName $canonicalCommand)
     $targets = @()
+    $explicitNameObserved = $false
+
+    # First bind an explicit -Name (including a unique abbreviation). This is
+    # independent of where other named parameters appear in the command.
     for ($index = 1; $index -lt $elements.Count; $index++) {
         $element = $elements[$index]
         if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
             continue
         }
-
-        if (-not (Test-BraintrustSetVariableNameParameterPrefix -ParameterName ([string]$element.ParameterName))) {
+        $resolved = Resolve-BraintrustVariableCommandParameter -ParameterName ([string]$element.ParameterName) -ParameterSpec $parameterSpec
+        if ($null -eq $resolved -or $resolved.Name -ne 'Name') {
             continue
         }
 
+        $explicitNameObserved = $true
         if ($null -ne $element.Argument) {
             $targets += $element.Argument
             continue
@@ -329,18 +389,51 @@ function Get-BraintrustSetVariableNameTargets {
         $valueIndex = $index + 1
         if ($valueIndex -lt $elements.Count -and $elements[$valueIndex] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
             $targets += $elements[$valueIndex]
-            $index = $valueIndex
         }
     }
 
-    if ($targets.Count -eq 0 -and $elements.Count -gt 1 -and $elements[1] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
-        # Only the unambiguous first positional argument is interpreted as -Name.
-        # Once another parameter precedes it, parameter binding can be ambiguous and
-        # this lightweight guard declines to guess.
-        $targets += $elements[1]
+    if (-not $explicitNameObserved) {
+        # Locate position 0 even when named parameters precede it. Known switch
+        # parameters do not consume the next element; known value parameters do.
+        # Unknown or ambiguous parameter prefixes make the remaining binder state
+        # uncertain, so decline positional inference instead of guessing.
+        $skipNextValue = $false
+        for ($index = 1; $index -lt $elements.Count; $index++) {
+            $element = $elements[$index]
+            if ($skipNextValue) {
+                if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                    $skipNextValue = $false
+                    continue
+                }
+                # A named parameter where a value was expected is invalid/ambiguous
+                # runtime syntax. Do not infer a positional Name after this point.
+                break
+            }
+
+            if ($element -is [System.Management.Automation.Language.CommandParameterAst]) {
+                $resolved = Resolve-BraintrustVariableCommandParameter -ParameterName ([string]$element.ParameterName) -ParameterSpec $parameterSpec
+                if ($null -eq $resolved) {
+                    break
+                }
+                if (-not $resolved.IsSwitch -and $null -eq $element.Argument) {
+                    $skipNextValue = $true
+                }
+                continue
+            }
+
+            $targets += $element
+            break
+        }
     }
 
-    return $targets
+    $result = @()
+    foreach ($target in $targets) {
+        $result += [pscustomobject]@{
+            Kind = $writeKind
+            TargetAst = $target
+        }
+    }
+    return $result
 }
 
 $files = Get-ChildItem -Path $Root -Filter "*.ps1" -File | Where-Object { $_.Name -ne "Test-Scripts.ps1" }
@@ -439,11 +532,13 @@ foreach ($file in $files) {
         $node -is [System.Management.Automation.Language.CommandAst]
     }, $true)
     foreach ($commandAst in $commandAsts) {
-        foreach ($targetAst in (Get-BraintrustSetVariableNameTargets -CommandAst $commandAst -DefinedFunctionNames $definedFunctionNames)) {
+        foreach ($writeTarget in (Get-BraintrustVariableNameWriteTargets -CommandAst $commandAst -DefinedFunctionNames $definedFunctionNames)) {
+            $targetAst = $writeTarget.TargetAst
+            $writeKind = [string]$writeTarget.Kind
             foreach ($literalName in (Get-BraintrustStaticStringValues -ValueAst $targetAst)) {
                 if (Test-BraintrustAutomaticVariableNameText -Name $literalName) {
                     $collisions += [pscustomobject]@{
-                        Kind = 'set-variable'
+                        Kind = $writeKind
                         Variable = [string]$literalName
                         Extent = $targetAst.Extent
                     }
@@ -454,7 +549,7 @@ foreach ($file in $files) {
                 foreach ($literalName in (Get-BraintrustAdjacentStaticStringValuesForVariableTarget -VariableAst $targetAst -CommandAst $commandAst -AssignmentAsts @($assignmentAsts) -SourceText $sourceText)) {
                     if (Test-BraintrustAutomaticVariableNameText -Name $literalName) {
                         $collisions += [pscustomobject]@{
-                            Kind = 'set-variable-adjacent-constant'
+                            Kind = ($writeKind + '-adjacent-constant')
                             Variable = [string]$literalName
                             Extent = $targetAst.Extent
                         }
