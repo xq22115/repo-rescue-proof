@@ -516,6 +516,221 @@ function Get-BraintrustVariableNameWriteTargets {
     return $result
 }
 
+function Get-BraintrustProviderItemCommandParameterSpec {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Set-Item', 'Clear-Item', 'Remove-Item')]
+        [string]$CommandName
+    )
+
+    # Bounded parameter model used only to locate position-0 Path when common
+    # named parameters precede it. Unknown/ambiguous prefixes make inference stop.
+    $switches = @('Force', 'WhatIf', 'Confirm', 'Verbose', 'Debug')
+    if ($CommandName -eq 'Set-Item') {
+        $switches += 'PassThru'
+    }
+    if ($CommandName -eq 'Remove-Item') {
+        $switches += 'Recurse'
+    }
+
+    $values = @(
+        'Path', 'LiteralPath', 'Filter', 'Include', 'Exclude', 'Credential',
+        'ErrorAction', 'ErrorVariable', 'WarningAction', 'WarningVariable',
+        'InformationAction', 'InformationVariable', 'OutVariable', 'OutBuffer',
+        'PipelineVariable', 'ProgressAction'
+    )
+    if ($CommandName -eq 'Set-Item') {
+        $values += 'Value'
+    }
+
+    $result = @()
+    foreach ($name in $switches) {
+        $result += [pscustomobject]@{ Name = $name; IsSwitch = $true }
+    }
+    foreach ($name in $values) {
+        $result += [pscustomobject]@{ Name = $name; IsSwitch = $false }
+    }
+    return $result
+}
+
+function Get-BraintrustProviderItemMutationTargets {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [System.Management.Automation.Language.FunctionDefinitionAst[]]$FunctionDefinitionAsts = @()
+    )
+
+    $commandName = [string]$CommandAst.GetCommandName()
+    if ([string]::IsNullOrWhiteSpace($commandName)) {
+        return @()
+    }
+
+    $leafName = $commandName
+    $separatorIndex = $leafName.LastIndexOf([char]92)
+    if ($separatorIndex -ge 0) {
+        $leafName = $leafName.Substring($separatorIndex + 1)
+    }
+
+    $canonicalCommand = $null
+    $writeKind = $null
+    $isBuiltinAlias = $false
+    if ($leafName -ieq 'Set-Item') {
+        $canonicalCommand = 'Set-Item'
+        $writeKind = 'set-item-variable-provider'
+    }
+    elseif ($leafName -ieq 'si') {
+        $canonicalCommand = 'Set-Item'
+        $writeKind = 'set-item-variable-provider'
+        $isBuiltinAlias = $true
+    }
+    elseif ($leafName -ieq 'Clear-Item') {
+        $canonicalCommand = 'Clear-Item'
+        $writeKind = 'clear-item-variable-provider'
+    }
+    elseif ($leafName -ieq 'cli') {
+        $canonicalCommand = 'Clear-Item'
+        $writeKind = 'clear-item-variable-provider'
+        $isBuiltinAlias = $true
+    }
+    elseif ($leafName -ieq 'Remove-Item') {
+        $canonicalCommand = 'Remove-Item'
+        $writeKind = 'remove-item-variable-provider'
+    }
+    elseif ($leafName -ieq 'ri') {
+        $canonicalCommand = 'Remove-Item'
+        $writeKind = 'remove-item-variable-provider'
+        $isBuiltinAlias = $true
+    }
+    else {
+        return @()
+    }
+
+    # Do not reinterpret a definitely shadowed built-in alias as a provider cmdlet.
+    if ($isBuiltinAlias -and (Test-BraintrustBuiltinAliasDefinitelyShadowed -AliasName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts)) {
+        return @()
+    }
+
+    $elements = @($CommandAst.CommandElements)
+    $parameterSpec = @(Get-BraintrustProviderItemCommandParameterSpec -CommandName $canonicalCommand)
+    $targets = @()
+    $explicitPathObserved = $false
+
+    # Prefer an explicit -Path/-LiteralPath (including unique abbreviations).
+    for ($index = 1; $index -lt $elements.Count; $index++) {
+        $element = $elements[$index]
+        if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+            continue
+        }
+        $resolved = Resolve-BraintrustVariableCommandParameter -ParameterName ([string]$element.ParameterName) -ParameterSpec $parameterSpec
+        if ($null -eq $resolved -or $resolved.Name -notin @('Path', 'LiteralPath')) {
+            continue
+        }
+
+        $explicitPathObserved = $true
+        $targetAst = $element.Argument
+        if ($null -eq $targetAst) {
+            $valueIndex = $index + 1
+            if ($valueIndex -lt $elements.Count -and $elements[$valueIndex] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                $targetAst = $elements[$valueIndex]
+            }
+        }
+        if ($null -ne $targetAst) {
+            $targets += [pscustomobject]@{
+                Kind = $writeKind
+                TargetAst = $targetAst
+                LiteralPath = ($resolved.Name -eq 'LiteralPath')
+            }
+        }
+    }
+
+    if (-not $explicitPathObserved) {
+        # Locate the position-0 Path while respecting a small known parameter model.
+        $skipNextValue = $false
+        for ($index = 1; $index -lt $elements.Count; $index++) {
+            $element = $elements[$index]
+            if ($skipNextValue) {
+                if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                    $skipNextValue = $false
+                    continue
+                }
+                break
+            }
+
+            if ($element -is [System.Management.Automation.Language.CommandParameterAst]) {
+                $resolved = Resolve-BraintrustVariableCommandParameter -ParameterName ([string]$element.ParameterName) -ParameterSpec $parameterSpec
+                if ($null -eq $resolved) {
+                    break
+                }
+                if (-not $resolved.IsSwitch -and $null -eq $element.Argument) {
+                    $skipNextValue = $true
+                }
+                continue
+            }
+
+            $targets += [pscustomobject]@{
+                Kind = $writeKind
+                TargetAst = $element
+                LiteralPath = $false
+            }
+            break
+        }
+    }
+
+    return $targets
+}
+
+function Test-BraintrustVariableProviderPathTargetsAutomaticVariable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PathText,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$LiteralPath
+    )
+
+    $providerMatch = [regex]::Match($PathText, '^(?i:variable):(?<target>.*)$')
+    if (-not $providerMatch.Success) {
+        return $false
+    }
+
+    $target = [string]$providerMatch.Groups['target'].Value
+    $target = $target.TrimStart([char]92, [char]47)
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        return $false
+    }
+
+    # Native Windows 2022/2025 probes show provider-qualified scoped forms such
+    # as Variable:global:PID reach the same protected automatic-variable surface.
+    $scopeMatch = [regex]::Match($target, '^(?i:global|script|local|private):(?<name>.+)$')
+    if ($scopeMatch.Success) {
+        $target = [string]$scopeMatch.Groups['name'].Value
+    }
+
+    if ($LiteralPath) {
+        return (Test-BraintrustAutomaticVariableNameText -Name $target)
+    }
+
+    # -Path is wildcard-aware. If a static provider pattern can select any known
+    # automatic variable, fail closed. LiteralPath intentionally does not do this.
+    try {
+        $pattern = [System.Management.Automation.WildcardPattern]::new(
+            $target,
+            [System.Management.Automation.WildcardOptions]::IgnoreCase
+        )
+    }
+    catch {
+        return $false
+    }
+
+    foreach ($automaticName in $automaticVariableNames) {
+        if ($pattern.IsMatch([string]$automaticName)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 $files = Get-ChildItem -Path $Root -Filter "*.ps1" -File | Where-Object { $_.Name -ne "Test-Scripts.ps1" }
 if (-not $files) {
     throw "No PowerShell scripts found under $Root"
@@ -633,6 +848,34 @@ foreach ($file in $files) {
                         $collisions += [pscustomobject]@{
                             Kind = ($writeKind + '-adjacent-constant')
                             Variable = [string]$literalName
+                            Extent = $targetAst.Extent
+                        }
+                    }
+                }
+            }
+        }
+
+        foreach ($providerTarget in (Get-BraintrustProviderItemMutationTargets -CommandAst $commandAst -FunctionDefinitionAsts $functionDefinitionAsts)) {
+            $targetAst = $providerTarget.TargetAst
+            $writeKind = [string]$providerTarget.Kind
+            $isLiteralPath = [bool]$providerTarget.LiteralPath
+
+            foreach ($literalPath in (Get-BraintrustStaticStringValues -ValueAst $targetAst)) {
+                if (Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath) {
+                    $collisions += [pscustomobject]@{
+                        Kind = $writeKind
+                        Variable = [string]$literalPath
+                        Extent = $targetAst.Extent
+                    }
+                }
+            }
+
+            if ($targetAst -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                foreach ($literalPath in (Get-BraintrustAdjacentStaticStringValuesForVariableTarget -VariableAst $targetAst -CommandAst $commandAst -AssignmentAsts @($assignmentAsts) -SourceText $sourceText)) {
+                    if (Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath) {
+                        $collisions += [pscustomobject]@{
+                            Kind = ($writeKind + '-adjacent-constant')
+                            Variable = [string]$literalPath
                             Extent = $targetAst.Extent
                         }
                     }

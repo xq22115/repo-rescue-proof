@@ -404,6 +404,84 @@ Remove-Variable -Name $name -Force
 Remove-Variable -Name '*' -Force
 '@
 
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-ordinary-variable' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Item -LiteralPath 'Variable:ordinaryProviderTarget' -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-filesystem-path-is-not-variable-provider' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Item -LiteralPath '.\\ordinary.txt' -Value 'x'
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-literal-wildcard-is-not-treated-as-path-wildcard' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Set-Item -LiteralPath 'Variable:P*' -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-literal-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+Set-Item -LiteralPath 'Variable:PID' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-path-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+Set-Item -Path 'Variable:PID' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-positional-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+Set-Item 'Variable:PID' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-leading-force-positional-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+Set-Item -Force 'Variable:PID' -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-backslash-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:\\\\PID'.*automatic variable" -Content @'
+Set-Item -LiteralPath 'Variable:\PID' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-global-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:global:PID'.*automatic variable" -Content @'
+Set-Item -LiteralPath 'Variable:global:PID' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-wildcard-path' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:P\\*'.*automatic variable" -Content @'
+Set-Item -Path 'Variable:P*' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-alias-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+si -LiteralPath 'Variable:PID' -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+Clear-Item -LiteralPath 'Variable:PID' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-clear-item-wildcard' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider variable 'Variable:P\\*'.*automatic variable" -Content @'
+Clear-Item -Path 'Variable:P*' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-clear-item-alias-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+cli -LiteralPath 'Variable:PID' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-remove-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+Remove-Item -LiteralPath 'Variable:PID' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-remove-item-alias-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+ri -LiteralPath 'Variable:PID' -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-module-qualified-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:Error'.*automatic variable" -Content @'
+Microsoft.PowerShell.Management\Set-Item -LiteralPath 'Variable:Error' -Value @() -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-set-item-adjacent-constant' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider-adjacent-constant variable 'Variable:PID'.*automatic variable" -Content @'
+$providerPath = 'Variable:PID'
+Set-Item -LiteralPath $providerPath -Value 1 -Force
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-shadowed-si-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function si { param($LiteralPath, $Value) Write-Output $LiteralPath }
+si -LiteralPath 'Variable:PID' -Value 1
+'@
+
     Invoke-BraintrustLintFixture -Name 'shadowed-clv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
 function clv { param($Name) Write-Output $Name }
 clv PID
