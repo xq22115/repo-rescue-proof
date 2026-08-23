@@ -135,6 +135,46 @@ Set-Item -LiteralPath $providerPath -Value 1 -Force
 function si { param($LiteralPath, $Value) Write-Output $LiteralPath }
 si -LiteralPath 'Variable:PID' -Value 1
 '@
+
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-ordinary-variable' -ExpectedExitCode 0 -ExpectedOutputFragment 'automatic-variable collision guard' -Content @'
+Set-Location Variable:
+Set-Item -LiteralPath ordinaryProviderTarget -Value 1
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider-current-location variable 'PID'" -Content @'
+Set-Location Variable:
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "clear-item-variable-provider-current-location variable 'PID'" -Content @'
+Set-Location -Path 'Variable:'; Clear-Item -LiteralPath PID -Force
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-remove-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "remove-item-variable-provider-current-location variable 'PID'" -Content @'
+Microsoft.PowerShell.Management\Set-Location -LiteralPath 'Variable:'
+Remove-Item -LiteralPath PID -Force
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-wildcard-path' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider-current-location variable 'P*'" -Content @'
+Set-Location Variable:
+Set-Item -Path 'P*' -Value 1 -Force
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-literal-wildcard' -ExpectedExitCode 0 -ExpectedOutputFragment 'automatic-variable collision guard' -Content @'
+Set-Location Variable:
+Set-Item -LiteralPath 'P*' -Value 1 -Force
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'non-variable-location-does-not-trigger' -ExpectedExitCode 0 -ExpectedOutputFragment 'automatic-variable collision guard' -Content @'
+Set-Location .
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
+
+    Invoke-BraintrustProviderLintFixture -Name 'intervening-statement-declines-location-inference' -ExpectedExitCode 0 -ExpectedOutputFragment 'automatic-variable collision guard' -Content @'
+Set-Location Variable:
+Write-Output ok
+Set-Item -LiteralPath PID -Value 1 -Force
+'@
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

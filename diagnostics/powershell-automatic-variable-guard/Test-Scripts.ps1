@@ -731,6 +731,129 @@ function Test-BraintrustVariableProviderPathTargetsAutomaticVariable {
     return $false
 }
 
+function Get-BraintrustStaticSetLocationPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.CommandAst]$CommandAst
+    )
+
+    $commandName = [string]$CommandAst.GetCommandName()
+    if ([string]::IsNullOrWhiteSpace($commandName)) {
+        return @()
+    }
+    $leafName = $commandName
+    $separatorIndex = $leafName.LastIndexOf([char]92)
+    if ($separatorIndex -ge 0) {
+        $leafName = $leafName.Substring($separatorIndex + 1)
+    }
+    if ($leafName -ine 'Set-Location') {
+        return @()
+    }
+
+    $elements = @($CommandAst.CommandElements)
+    for ($index = 1; $index -lt $elements.Count; $index++) {
+        $element = $elements[$index]
+        if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+            continue
+        }
+        $parameterName = [string]$element.ParameterName
+        if ($parameterName -ine 'Path' -and $parameterName -ine 'LiteralPath') {
+            return @()
+        }
+        $targetAst = $element.Argument
+        if ($null -eq $targetAst) {
+            $valueIndex = $index + 1
+            if ($valueIndex -ge $elements.Count -or $elements[$valueIndex] -is [System.Management.Automation.Language.CommandParameterAst]) {
+                return @()
+            }
+            $targetAst = $elements[$valueIndex]
+        }
+        $values = @(Get-BraintrustStaticStringValues -ValueAst $targetAst)
+        if ($values.Count -eq 1) {
+            return ,([string]$values[0])
+        }
+        return @()
+    }
+
+    # Keep positional inference deliberately narrow: command + one static path.
+    if ($elements.Count -eq 2 -and $elements[1] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+        $values = @(Get-BraintrustStaticStringValues -ValueAst $elements[1])
+        if ($values.Count -eq 1) {
+            return ,([string]$values[0])
+        }
+    }
+    return @()
+}
+
+function Test-BraintrustImmediatelyInVariableProviderLocation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.Language.CommandAst[]]$CommandAsts,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceText
+    )
+
+    $commandContainer = Get-BraintrustEnclosingStatementContainer -Ast $CommandAst
+    if ($null -eq $commandContainer) {
+        return $false
+    }
+
+    foreach ($candidate in $CommandAsts) {
+        if ($candidate.Extent.EndOffset -gt $CommandAst.Extent.StartOffset) {
+            continue
+        }
+        $candidateContainer = Get-BraintrustEnclosingStatementContainer -Ast $candidate
+        if ($null -eq $candidateContainer -or -not [object]::ReferenceEquals($candidateContainer, $commandContainer)) {
+            continue
+        }
+        $paths = @(Get-BraintrustStaticSetLocationPath -CommandAst $candidate)
+        if ($paths.Count -ne 1) {
+            continue
+        }
+
+        $gapStart = [int]$candidate.Extent.EndOffset
+        $gapLength = [int]$CommandAst.Extent.StartOffset - $gapStart
+        if ($gapStart -lt 0 -or $gapLength -lt 0 -or ($gapStart + $gapLength) -gt $SourceText.Length) {
+            continue
+        }
+        $gap = $SourceText.Substring($gapStart, $gapLength)
+        if ($gap -notmatch '^[\s;]*$') {
+            continue
+        }
+
+        $normalizedLocation = ([string]$paths[0]).Trim()
+        if ($normalizedLocation -match '^(?i:variable):[\\/]?$') {
+            return $true
+        }
+        return $false
+    }
+    return $false
+}
+
+function Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PathText,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$LiteralPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathText)) {
+        return $false
+    }
+    # Only model a simple provider-relative name/pattern. Scoped names, rooted
+    # provider paths, dot segments and dynamic path composition remain unmodeled.
+    if ($PathText.Contains(':') -or $PathText.Contains([char]92) -or $PathText.Contains([char]47)) {
+        return $false
+    }
+    return Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ('Variable:' + $PathText) -LiteralPath $LiteralPath
+}
+
 $files = Get-ChildItem -Path $Root -Filter "*.ps1" -File | Where-Object { $_.Name -ne "Test-Scripts.ps1" }
 if (-not $files) {
     throw "No PowerShell scripts found under $Root"
@@ -855,15 +978,19 @@ foreach ($file in $files) {
             }
         }
 
+        $immediatelyInVariableProviderLocation = Test-BraintrustImmediatelyInVariableProviderLocation -CommandAst $commandAst -CommandAsts @($commandAsts) -SourceText $sourceText
         foreach ($providerTarget in (Get-BraintrustProviderItemMutationTargets -CommandAst $commandAst -FunctionDefinitionAsts $functionDefinitionAsts)) {
             $targetAst = $providerTarget.TargetAst
             $writeKind = [string]$providerTarget.Kind
             $isLiteralPath = [bool]$providerTarget.LiteralPath
 
             foreach ($literalPath in (Get-BraintrustStaticStringValues -ValueAst $targetAst)) {
-                if (Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath) {
+                $explicitProviderCollision = Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath
+                $currentLocationCollision = (-not $explicitProviderCollision -and $immediatelyInVariableProviderLocation -and
+                    (Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath))
+                if ($explicitProviderCollision -or $currentLocationCollision) {
                     $collisions += [pscustomobject]@{
-                        Kind = $writeKind
+                        Kind = $(if ($currentLocationCollision) { $writeKind + '-current-location' } else { $writeKind })
                         Variable = [string]$literalPath
                         Extent = $targetAst.Extent
                     }
@@ -872,9 +999,13 @@ foreach ($file in $files) {
 
             if ($targetAst -is [System.Management.Automation.Language.VariableExpressionAst]) {
                 foreach ($literalPath in (Get-BraintrustAdjacentStaticStringValuesForVariableTarget -VariableAst $targetAst -CommandAst $commandAst -AssignmentAsts @($assignmentAsts) -SourceText $sourceText)) {
-                    if (Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath) {
+                    $explicitProviderCollision = Test-BraintrustVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath
+                    $currentLocationCollision = (-not $explicitProviderCollision -and $immediatelyInVariableProviderLocation -and
+                        (Test-BraintrustRelativeCurrentVariableProviderPathTargetsAutomaticVariable -PathText ([string]$literalPath) -LiteralPath $isLiteralPath))
+                    if ($explicitProviderCollision -or $currentLocationCollision) {
+                        $suffix = if ($currentLocationCollision) { '-current-location-adjacent-constant' } else { '-adjacent-constant' }
                         $collisions += [pscustomobject]@{
-                            Kind = ($writeKind + '-adjacent-constant')
+                            Kind = ($writeKind + $suffix)
                             Variable = [string]$literalPath
                             Extent = $targetAst.Extent
                         }
