@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   ubuntu:
@@ -41,3 +44,175 @@ jobs:
           Write-Output 'runner_started=true'
           Write-Output "runner_os=${{ runner.os }}"
           Write-Output "runner_arch=${{ runner.arch }}"
+
+  github-hosted-trusted-builder:
+    name: github-hosted trusted-builder attestation canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create public diagnostic subject
+        id: subject
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -p trusted-builder-canary
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          subject = {
+              "component": "public-github-hosted-trusted-builder-canary-subject",
+              "schemaVersion": 1,
+              "repository": "xq22115/repo-rescue-proof",
+              "sourceSha": os.environ["SOURCE_SHA"],
+              "workflowRunId": int(os.environ["RUN_ID"]),
+              "workflowRunAttempt": int(os.environ["RUN_ATTEMPT"]),
+              "acceptanceBoundary": {
+                  "diagnosticOnly": True,
+                  "privateBraintrustEvidenceIncluded": False,
+                  "privateBraintrustTrustedBuilderAccepted": False,
+                  "portableWindowsContractAccepted": False,
+                  "targetWindowsOdrAccepted": False,
+                  "mcpSemanticToolAccepted": False,
+                  "windowsFinalStateAccepted": False,
+              },
+          }
+          Path("trusted-builder-canary/subject.json").write_text(
+              json.dumps(subject, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          sha256sum trusted-builder-canary/subject.json > trusted-builder-canary/SHA256SUMS
+          echo "subject_sha256=$(cut -d' ' -f1 trusted-builder-canary/SHA256SUMS)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub/Sigstore attestation
+        id: attest_subject
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: trusted-builder-canary/subject.json
+
+      - name: Verify GitHub-hosted trusted-builder policy
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE_PATH: ${{ steps.attest_subject.outputs.bundle-path }}
+          SOURCE_SHA: ${{ github.sha }}
+          SUBJECT_SHA256: ${{ steps.subject.outputs.subject_sha256 }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE_PATH"
+          test -s "$ATTESTATION_BUNDLE_PATH"
+          cp -- "$ATTESTATION_BUNDLE_PATH" trusted-builder-canary/attestation.sigstore.json
+          gh attestation verify \
+            trusted-builder-canary/subject.json \
+            --repo xq22115/repo-rescue-proof \
+            --bundle trusted-builder-canary/attestation.sigstore.json \
+            --signer-workflow 'xq22115/repo-rescue-proof/.github/workflows/public-standard-hosted-runner-canary.yml' \
+            --source-digest "$SOURCE_SHA" \
+            --deny-self-hosted-runners \
+            --format json \
+            > trusted-builder-canary/verification.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          subject_path = Path("trusted-builder-canary/subject.json")
+          verification_path = Path("trusted-builder-canary/verification.json")
+          verification = json.loads(verification_path.read_text(encoding="utf-8"))
+          if not isinstance(verification, list) or len(verification) != 1:
+              raise SystemExit("TRUSTED_BUILDER_CANARY_EXPECTED_ONE_VERIFICATION_ENTRY")
+          result = verification[0].get("verificationResult")
+          if not isinstance(result, dict):
+              raise SystemExit("TRUSTED_BUILDER_CANARY_VERIFICATION_RESULT_MISSING")
+          signature = result.get("signature")
+          if not isinstance(signature, dict) or not isinstance(signature.get("certificate"), dict):
+              raise SystemExit("TRUSTED_BUILDER_CANARY_CERTIFICATE_MISSING")
+          certificate = signature["certificate"]
+          statement = result.get("statement")
+          if not isinstance(statement, dict):
+              raise SystemExit("TRUSTED_BUILDER_CANARY_STATEMENT_MISSING")
+          subjects = statement.get("subject")
+          if not isinstance(subjects, list) or len(subjects) != 1 or not isinstance(subjects[0], dict):
+              raise SystemExit("TRUSTED_BUILDER_CANARY_SUBJECT_COUNT_INVALID")
+          digest = subjects[0].get("digest")
+          if not isinstance(digest, dict):
+              raise SystemExit("TRUSTED_BUILDER_CANARY_SUBJECT_DIGEST_MISSING")
+
+          expected_subject_sha = os.environ["SUBJECT_SHA256"].lower()
+          observed_subject_sha = hashlib.sha256(subject_path.read_bytes()).hexdigest()
+          verified_subject_sha = str(digest.get("sha256", "")).lower()
+          if observed_subject_sha != expected_subject_sha or verified_subject_sha != expected_subject_sha:
+              raise SystemExit("TRUSTED_BUILDER_CANARY_SUBJECT_SHA_MISMATCH")
+          if certificate.get("runnerEnvironment") != "github-hosted":
+              raise SystemExit("TRUSTED_BUILDER_CANARY_NOT_GITHUB_HOSTED")
+          if certificate.get("sourceRepositoryURI") != "https://github.com/xq22115/repo-rescue-proof":
+              raise SystemExit("TRUSTED_BUILDER_CANARY_REPOSITORY_MISMATCH")
+          source_digest = str(certificate.get("sourceRepositoryDigest", "")).lower()
+          expected_source_sha = os.environ["SOURCE_SHA"].lower()
+          if source_digest != expected_source_sha:
+              raise SystemExit("TRUSTED_BUILDER_CANARY_SOURCE_SHA_MISMATCH")
+
+          receipt = {
+              "component": "public-github-hosted-trusted-builder-attestation-canary",
+              "schemaVersion": 1,
+              "repository": "xq22115/repo-rescue-proof",
+              "subject": {"sha256": expected_subject_sha},
+              "producer": {
+                  "sourceSha": expected_source_sha,
+                  "workflowRunId": int(os.environ["RUN_ID"]),
+                  "workflowRunAttempt": int(os.environ["RUN_ATTEMPT"]),
+              },
+              "certificateEvidence": {
+                  "runnerEnvironment": "github-hosted",
+                  "sourceRepositoryURI": certificate.get("sourceRepositoryURI"),
+                  "sourceRepositoryDigest": source_digest,
+                  "buildSignerDigest": certificate.get("buildSignerDigest"),
+                  "buildConfigDigest": certificate.get("buildConfigDigest"),
+                  "buildTrigger": certificate.get("buildTrigger"),
+                  "runInvocationURI": certificate.get("runInvocationURI"),
+                  "sourceRepositoryVisibilityAtSigning": certificate.get("sourceRepositoryVisibilityAtSigning"),
+              },
+              "policy": {
+                  "name": "github-cli-deny-self-hosted-runners",
+                  "denySelfHostedRunnersRequested": True,
+                  "denySelfHostedVerificationAccepted": True,
+              },
+              "acceptanceBoundary": {
+                  "artifactWorkflowProvenanceVerified": True,
+                  "githubHostedBuilderObserved": True,
+                  "trustedBuilderPolicyAccepted": True,
+                  "diagnosticOnly": True,
+                  "artifactSecurityAccepted": False,
+                  "privateBraintrustTrustedBuilderAccepted": False,
+                  "portableWindowsContractAccepted": False,
+                  "targetWindowsOdrAccepted": False,
+                  "mcpSemanticToolAccepted": False,
+                  "windowsFinalStateAccepted": False,
+              },
+          }
+          Path("trusted-builder-canary/trusted-builder-canary-receipt.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          sha256sum \
+            trusted-builder-canary/attestation.sigstore.json \
+            trusted-builder-canary/verification.json \
+            trusted-builder-canary/trusted-builder-canary-receipt.json \
+            >> trusted-builder-canary/SHA256SUMS
+
+      - name: Upload trusted-builder canary evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-github-hosted-trusted-builder-canary-${{ github.run_id }}
+          path: trusted-builder-canary/
+          if-no-files-found: error
+          retention-days: 14
