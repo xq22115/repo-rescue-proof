@@ -64,12 +64,12 @@ Write-Output 'BRAINTRUST_MUTATION_COMPLETED'
 "@
 
         foreach ($command in @('Set-Item','Clear-Item','Remove-Item')) {
-            $args = if ($command -eq 'Set-Item') { "-LiteralPath 'PID' -Value 1 -Force" } else { "-LiteralPath 'PID' -Force" }
+            $mutationArgs = if ($command -eq 'Set-Item') { "-LiteralPath 'PID' -Value 1 -Force" } else { "-LiteralPath 'PID' -Force" }
             Invoke-ChildCase -Name ($caseName + '-' + $command.ToLowerInvariant() + '-pid') -ExpectedExitCode 1 -ExpectMarker $false -Script @"
 `$ErrorActionPreference = 'Stop'
 $locationCommand Variable:
 if ((Get-Location).Provider.Name -ine 'Variable') { throw 'location command did not enter Variable provider' }
-$command $args
+$command $mutationArgs
 Write-Output 'BRAINTRUST_MUTATION_COMPLETED'
 "@
         }
