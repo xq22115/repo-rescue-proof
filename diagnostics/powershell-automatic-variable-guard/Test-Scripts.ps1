@@ -339,10 +339,10 @@ function Get-BraintrustEnclosingStatementContainer {
     return $null
 }
 
-function Test-BraintrustBuiltinAliasDefinitelyShadowed {
+function Test-BraintrustEarlierSameNameFunctionDefined {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$AliasName,
+        [string]$CommandName,
 
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.CommandAst]$CommandAst,
@@ -360,7 +360,7 @@ function Test-BraintrustBuiltinAliasDefinitelyShadowed {
     }
 
     foreach ($functionAst in $FunctionDefinitionAsts) {
-        if ([string]$functionAst.Name -ine $AliasName) {
+        if ([string]$functionAst.Name -ine $CommandName) {
             continue
         }
         if ($functionAst.Extent.EndOffset -ge $CommandAst.Extent.StartOffset) {
@@ -436,11 +436,35 @@ function Get-BraintrustVariableNameWriteTargets {
         return @()
     }
 
-    # Locally-defined functions can shadow built-in aliases such as set/sv/nv/clv/rv. Do
-    # not reinterpret those function calls as variable cmdlets. Dynamic Set-Alias
-    # shadowing remains outside this small dependency-free static guard.
-    if ($isBuiltinAlias -and (Test-BraintrustBuiltinAliasDefinitelyShadowed -AliasName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts)) {
-        return @()
+    $separatorObserved = ($separatorIndex -ge 0)
+    if ($isBuiltinAlias) {
+        # Aliases have higher command precedence than functions. An earlier
+        # same-name function therefore does NOT prove that set/sv/nv/clv/rv will
+        # stop resolving as aliases. Alias state is mutable via Set-Alias/Alias:
+        # and may also come from profiles/imports, so keep these spellings as
+        # conservative potential variable-write surfaces rather than claiming
+        # verified cmdlet identity. A module-qualified command with an alias-like
+        # leaf is not a PowerShell alias and has no authority in this guard.
+        if ($separatorObserved) {
+            return @()
+        }
+    }
+    else {
+        if ($separatorObserved) {
+            if ($commandName -ine ('Microsoft.PowerShell.Utility' + [char]92 + $leafName)) {
+                return @()
+            }
+        }
+        elseif (Test-BraintrustEarlierSameNameFunctionDefined -CommandName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts) {
+            # Function precedence is above cmdlets. This bounded same-container
+            # definition is positive evidence that the unqualified spelling did
+            # not execute the built-in utility cmdlet.
+            return @()
+        }
+        # Otherwise the unqualified full cmdlet spelling remains identity-
+        # ambiguous because profiles/imports/prior session state may shadow it.
+        # Keep the dangerous static target fail-closed rather than assuming the
+        # cmdlet is immutable.
     }
 
     $elements = @($CommandAst.CommandElements)
@@ -606,9 +630,31 @@ function Get-BraintrustProviderItemMutationTargets {
         return @()
     }
 
-    # Do not reinterpret a definitely shadowed built-in alias as a provider cmdlet.
-    if ($isBuiltinAlias -and (Test-BraintrustBuiltinAliasDefinitelyShadowed -AliasName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts)) {
-        return @()
+    $separatorObserved = ($separatorIndex -ge 0)
+    if ($isBuiltinAlias) {
+        # Alias precedence is above functions, so a same-name function cannot be
+        # used as positive evidence that si/cli/ri stopped resolving as aliases.
+        # Prior-session alias mutation remains unknown; retain a dangerous static
+        # target as a fail-closed potential provider mutation. Module-qualified
+        # commands with alias-like leaves are not aliases and get no authority.
+        if ($separatorObserved) {
+            return @()
+        }
+    }
+    else {
+        if ($separatorObserved) {
+            if ($commandName -ine ('Microsoft.PowerShell.Management' + [char]92 + $leafName)) {
+                return @()
+            }
+        }
+        elseif (Test-BraintrustEarlierSameNameFunctionDefined -CommandName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts) {
+            # Function precedence is above cmdlets. A bounded earlier same-name
+            # function proves this unqualified spelling did not execute the
+            # built-in provider cmdlet, so do not invent provider mutation.
+            return @()
+        }
+        # Otherwise the unqualified cmdlet spelling remains ambiguous but is a
+        # possible provider mutation; dangerous static targets stay fail-closed.
     }
 
     $elements = @($CommandAst.CommandElements)
@@ -763,7 +809,7 @@ function Get-BraintrustStaticLocationTransitionEvidence {
         $identityKind = 'module-qualified-cmdlet'
     }
     elseif ($commandName -ieq $leafName) {
-        if (Test-BraintrustBuiltinAliasDefinitelyShadowed -AliasName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts) {
+        if (Test-BraintrustEarlierSameNameFunctionDefined -CommandName $leafName -CommandAst $CommandAst -FunctionDefinitionAsts $FunctionDefinitionAsts) {
             $identityKind = 'definitely-function-shadowed'
         }
         else {

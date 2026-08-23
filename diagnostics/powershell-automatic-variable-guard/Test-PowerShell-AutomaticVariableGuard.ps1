@@ -186,7 +186,7 @@ $obj.Value++
 $env:HOME = 'fixture-only'
 '@
 
-    Invoke-BraintrustLintFixture -Name 'shadowed-set-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+    Invoke-BraintrustLintFixture -Name 'same-name-function-does-not-shadow-set-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
 function set {
     param($Name, $Value)
     Write-Output "$Name=$Value"
@@ -194,12 +194,38 @@ function set {
 set PID 1
 '@
 
-    Invoke-BraintrustLintFixture -Name 'shadowed-nv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+    Invoke-BraintrustLintFixture -Name 'same-name-function-does-not-shadow-nv-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "new-variable variable 'PID'.*automatic variable" -Content @'
 function nv {
     param($Name, $Value)
     Write-Output "$Name=$Value"
 }
 nv PID 1
+'@
+
+
+    Invoke-BraintrustLintFixture -Name 'unqualified-set-variable-known-function-shadow-has-no-cmdlet-authority' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function Set-Variable {
+    param($Name, $Value)
+    Write-Output "shadow:$Name=$Value"
+}
+Set-Variable -Name PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'module-qualified-set-variable-bypasses-function-shadow' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+function Set-Variable {
+    param($Name, $Value)
+    Write-Output "shadow:$Name=$Value"
+}
+Microsoft.PowerShell.Utility\Set-Variable -Name PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'other-module-qualified-set-variable-has-no-builtin-authority' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Other.Module\Set-Variable -Name PID -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'same-name-function-does-not-shadow-sv-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
+function sv { param($Name, $Value) Write-Output "shadow:$Name=$Value" }
+sv PID 1
 '@
 
     Invoke-BraintrustLintFixture -Name 'later-set-function-does-not-shadow-earlier-builtin-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "set-variable variable 'PID'.*automatic variable" -Content @'
@@ -477,9 +503,34 @@ $providerPath = 'Variable:PID'
 Set-Item -LiteralPath $providerPath -Value 1 -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'provider-shadowed-si-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+    Invoke-BraintrustLintFixture -Name 'provider-same-name-function-does-not-shadow-si-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
 function si { param($LiteralPath, $Value) Write-Output $LiteralPath }
 si -LiteralPath 'Variable:PID' -Value 1
+'@
+
+
+    Invoke-BraintrustLintFixture -Name 'provider-unqualified-set-item-known-function-shadow-has-no-cmdlet-authority' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+function Set-Item { param($LiteralPath, $Value) Write-Output "shadow:$LiteralPath" }
+Set-Item -LiteralPath 'Variable:PID' -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-module-qualified-set-item-bypasses-function-shadow' -ExpectedExitCode 1 -ExpectedOutputPattern "set-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+function Set-Item { param($LiteralPath, $Value) Write-Output "shadow:$LiteralPath" }
+Microsoft.PowerShell.Management\Set-Item -LiteralPath 'Variable:PID' -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-other-module-qualified-set-item-has-no-builtin-authority' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+Other.Module\Set-Item -LiteralPath 'Variable:PID' -Value 1
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-same-name-function-does-not-shadow-cli-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+function cli { param($LiteralPath) Write-Output "shadow:$LiteralPath" }
+cli -LiteralPath 'Variable:PID'
+'@
+
+    Invoke-BraintrustLintFixture -Name 'provider-same-name-function-does-not-shadow-ri-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-item-variable-provider variable 'Variable:PID'.*automatic variable" -Content @'
+function ri { param($LiteralPath) Write-Output "shadow:$LiteralPath" }
+ri -LiteralPath 'Variable:PID'
 '@
 
     Invoke-BraintrustLintFixture -Name 'provider-current-location-ordinary-variable' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
@@ -571,12 +622,12 @@ Other.Module\Set-Location Variable:
 Set-Item -LiteralPath PID -Value 1 -Force
 '@
 
-    Invoke-BraintrustLintFixture -Name 'shadowed-clv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+    Invoke-BraintrustLintFixture -Name 'same-name-function-does-not-shadow-clv-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "clear-variable variable 'PID'.*automatic variable" -Content @'
 function clv { param($Name) Write-Output $Name }
 clv PID
 '@
 
-    Invoke-BraintrustLintFixture -Name 'shadowed-rv-function-is-not-builtin-alias' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
+    Invoke-BraintrustLintFixture -Name 'same-name-function-does-not-shadow-rv-alias' -ExpectedExitCode 1 -ExpectedOutputPattern "remove-variable variable 'PID'.*automatic variable" -Content @'
 function rv { param($Name) Write-Output $Name }
 rv PID
 '@
