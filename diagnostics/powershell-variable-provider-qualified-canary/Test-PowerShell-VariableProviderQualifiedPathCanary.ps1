@@ -78,14 +78,47 @@ finally {
     Remove-Variable -Name $wildName -ErrorAction SilentlyContinue
 }
 
+# Falsify the current static guard itself. The existing guard recognizes the
+# drive-qualified Variable: form, but its parser currently treats Variable::PID
+# as target ':PID' and does not recognize the module-qualified provider form.
+$lintScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'powershell-automatic-variable-guard\Test-Scripts.ps1'
+if (-not (Test-Path -LiteralPath $lintScript -PathType Leaf)) {
+    throw "Missing public Test-Scripts.ps1 at $lintScript"
+}
+$currentProcess = [System.Diagnostics.Process]::GetCurrentProcess()
+$shellPath = $currentProcess.MainModule.FileName
+if ([string]::IsNullOrWhiteSpace($shellPath) -or -not (Test-Path -LiteralPath $shellPath -PathType Leaf)) {
+    throw 'Could not resolve current PowerShell executable for guard-bypass falsification.'
+}
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("braintrust-provider-qualified-guard-bypass-{0}" -f [Guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $tempRoot -Force)
+$guardBypassObserved = $false
+try {
+    $fixturePath = Join-Path $tempRoot 'fixture.ps1'
+    Set-Content -LiteralPath $fixturePath -Encoding UTF8 -Value @'
+Microsoft.PowerShell.Management\Set-Item -LiteralPath 'Variable::PID' -Value 1 -Force
+Microsoft.PowerShell.Management\Clear-Item -LiteralPath 'Microsoft.PowerShell.Core\Variable::Error' -Force
+'@
+    $guardOutput = (& $shellPath -NoLogo -NoProfile -ExecutionPolicy Bypass -File $lintScript -Root $tempRoot 2>&1 | Out-String)
+    $guardExit = $LASTEXITCODE
+    if ($guardExit -ne 0) {
+        throw "Expected current guard to expose the provider-qualified bypass before the canonical fix, but it exited $guardExit. Output: $guardOutput"
+    }
+    $guardBypassObserved = $true
+}
+finally {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $receipt = [ordered]@{
     component = 'public-powershell-variable-provider-qualified-path-canary'
-    schemaVersion = 1
+    schemaVersion = 2
     osVersion = [Environment]::OSVersion.VersionString
     psEdition = $PSVersionTable.PSEdition
     psVersion = $PSVersionTable.PSVersion.ToString()
     results = $results
     providerQualifiedWildcardAccepted = $true
+    currentStaticGuardProviderQualifiedBypassObserved = $guardBypassObserved
     automaticVariableMutationAccepted = $false
 }
 $receipt | ConvertTo-Json -Depth 8
