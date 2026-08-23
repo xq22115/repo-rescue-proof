@@ -19,7 +19,11 @@ function Assert-JsonObject([object]$Value, [string]$Path) {
 function Get-RequiredProperty([object]$Object, [string]$Name, [string]$Path) {
     $property = $Object.PSObject.Properties[$Name]
     if ($null -eq $property) { throw "$Path.$Name is required." }
-    return $property.Value
+    # Preserve singleton JSON arrays as arrays across Windows PowerShell 5.1 and
+    # PowerShell 7. Ordinary function output enumerates arrays into the pipeline,
+    # which can collapse a one-element array into its sole PSCustomObject.
+    Write-Output -NoEnumerate $property.Value
+    return
 }
 
 function Get-RequiredString([object]$Object, [string]$Name, [string]$Path) {
@@ -110,7 +114,9 @@ foreach ($serverValue in $servers) {
 
         # A structured tuple is the routing identity. Neither serverInfo.name nor
         # tool name alone is globally unique across an aggregated multi-server client.
-        $routeTuple = "$serverIdentitySha256`u{001f}$toolName"
+        # Use an explicit separator character rather than the PowerShell 7-only
+        # `u{...} escape syntax so the fingerprint is identical on PS 5.1 and 7.
+        $routeTuple = $serverIdentitySha256 + [char]31 + $toolName
         if (-not $routeKeys.Add($routeTuple)) {
             throw "Duplicate structured route identity: server=$serverIdentitySha256 tool=$toolName"
         }
