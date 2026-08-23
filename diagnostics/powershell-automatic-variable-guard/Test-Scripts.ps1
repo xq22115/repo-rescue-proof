@@ -196,21 +196,7 @@ function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
     }
 
     $candidate = $null
-    if ($variableName -ieq 'name') {
-        Write-Host ("[DEBUG-ADJ] targetType={0} command={1}:{2}-{3} assignments={4}" -f $VariableAst.GetType().FullName, $CommandAst.Extent.StartLineNumber, $CommandAst.Extent.StartOffset, $CommandAst.Extent.EndOffset, $AssignmentAsts.Count)
-    }
     foreach ($assignmentAst in $AssignmentAsts) {
-        if ($variableName -ieq 'name') {
-            $leftName = if ($assignmentAst.Left -is [System.Management.Automation.Language.VariableExpressionAst]) { [string]$assignmentAst.Left.VariablePath.UserPath } else { '<non-variable>' }
-            $rightType = if ($null -ne $assignmentAst.Right) { $assignmentAst.Right.GetType().FullName } else { '<null>' }
-            Write-Host ("[DEBUG-ADJ] assignment left={0} op={1} rightType={2} extent={3}-{4}" -f $leftName, [string]$assignmentAst.Operator, $rightType, $assignmentAst.Extent.StartOffset, $assignmentAst.Extent.EndOffset)
-            if ($assignmentAst.Right -is [System.Management.Automation.Language.PipelineBaseAst]) {
-                $debugPure = $assignmentAst.Right.GetPureExpression()
-                $debugPureType = if ($null -ne $debugPure) { $debugPure.GetType().FullName } else { '<null>' }
-                $debugPureText = if ($null -ne $debugPure) { $debugPure.Extent.Text } else { '<null>' }
-                Write-Host ("[DEBUG-ADJ] pureType={0} pureText={1}" -f $debugPureType, $debugPureText)
-            }
-        }
         if ($assignmentAst.Extent.EndOffset -gt $CommandAst.Extent.StartOffset) {
             continue
         }
@@ -228,16 +214,22 @@ function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
             continue
         }
 
-        if ($assignmentAst.Right -isnot [System.Management.Automation.Language.PipelineBaseAst]) {
+        $valueExpression = $null
+        if ($assignmentAst.Right -is [System.Management.Automation.Language.CommandExpressionAst]) {
+            # Native Windows PowerShell 5.1/PowerShell 7 falsification showed that
+            # a plain assignment such as $name = 'PID' exposes the RHS as a
+            # CommandExpressionAst. Its Expression property is the literal AST.
+            $valueExpression = $assignmentAst.Right.Expression
+        }
+        elseif ($assignmentAst.Right -is [System.Management.Automation.Language.PipelineBaseAst]) {
+            $valueExpression = $assignmentAst.Right.GetPureExpression()
+        }
+
+        if ($null -eq $valueExpression) {
             continue
         }
 
-        $pureExpression = $assignmentAst.Right.GetPureExpression()
-        if ($null -eq $pureExpression) {
-            continue
-        }
-
-        $values = @(Get-BraintrustStaticStringValues -ValueAst $pureExpression)
+        $values = @(Get-BraintrustStaticStringValues -ValueAst $valueExpression)
         if ($values.Count -ne 1) {
             continue
         }
