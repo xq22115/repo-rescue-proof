@@ -46,6 +46,31 @@ function Invoke-BraintrustLintFixture {
     }
 }
 
+# Native behavior probe: the static guard relies on PowerShell's documented
+# unique-prefix binding semantics, so prove the current shell actually binds
+# -N, -Na, and -Nam to Set-Variable -Name before accepting the regression.
+$runtimePrefixProbeN = 'BraintrustPrefixProbeN'
+$runtimePrefixProbeNa = 'BraintrustPrefixProbeNa'
+$runtimePrefixProbeNam = 'BraintrustPrefixProbeNam'
+try {
+    Set-Variable -N $runtimePrefixProbeN -Value 'N-bound'
+    Set-Variable -Na $runtimePrefixProbeNa -Value 'Na-bound'
+    Set-Variable -Nam $runtimePrefixProbeNam -Value 'Nam-bound'
+
+    if ((Get-Variable -Name $runtimePrefixProbeN -ValueOnly) -ne 'N-bound') {
+        throw 'Set-Variable -N did not bind to -Name in the current PowerShell runtime.'
+    }
+    if ((Get-Variable -Name $runtimePrefixProbeNa -ValueOnly) -ne 'Na-bound') {
+        throw 'Set-Variable -Na did not bind to -Name in the current PowerShell runtime.'
+    }
+    if ((Get-Variable -Name $runtimePrefixProbeNam -ValueOnly) -ne 'Nam-bound') {
+        throw 'Set-Variable -Nam did not bind to -Name in the current PowerShell runtime.'
+    }
+}
+finally {
+    Remove-Variable -Name $runtimePrefixProbeN, $runtimePrefixProbeNa, $runtimePrefixProbeNam -Force -ErrorAction SilentlyContinue
+}
+
 try {
     Invoke-BraintrustLintFixture -Name 'safe-reads-and-ordinary-writes' -ExpectedExitCode 0 -ExpectedOutputPattern 'automatic-variable collision guard' -Content @'
 $nativeWindowsObserved = $IsWindows
