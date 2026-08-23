@@ -260,6 +260,23 @@ function Get-BraintrustAdjacentStaticStringValuesForVariableTarget {
     return ,([string]$candidate.Value)
 }
 
+function Test-BraintrustSetVariableNameParameterPrefix {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ParameterName
+    )
+
+    # PowerShell accepts unique parameter-name prefixes. For the current
+    # Set-Variable parameter surface, Name is the only parameter beginning with N,
+    # so N/Na/Nam/Name all bind to -Name. Keep this bounded to literal static
+    # prefixes rather than attempting dynamic parameter binding.
+    if ([string]::IsNullOrWhiteSpace($ParameterName) -or $ParameterName.Length -gt 4) {
+        return $false
+    }
+
+    return ('Name'.Substring(0, $ParameterName.Length) -ieq $ParameterName)
+}
+
 function Get-BraintrustSetVariableNameTargets {
     param(
         [Parameter(Mandatory = $true)]
@@ -300,7 +317,7 @@ function Get-BraintrustSetVariableNameTargets {
             continue
         }
 
-        if ($element.ParameterName -ine 'Name') {
+        if (-not (Test-BraintrustSetVariableNameParameterPrefix -ParameterName ([string]$element.ParameterName))) {
             continue
         }
 
