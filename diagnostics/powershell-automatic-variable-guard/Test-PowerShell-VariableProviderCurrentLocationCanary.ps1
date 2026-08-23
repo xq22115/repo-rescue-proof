@@ -1,0 +1,57 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$currentProcess = [System.Diagnostics.Process]::GetCurrentProcess()
+$shellPath = $currentProcess.MainModule.FileName
+if ([string]::IsNullOrWhiteSpace($shellPath) -or -not (Test-Path -LiteralPath $shellPath -PathType Leaf)) {
+    throw 'Could not resolve current PowerShell executable.'
+}
+
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("braintrust-provider-location-{0}" -f [guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $tempRoot -Force)
+
+function Invoke-ChildCase {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Script,
+        [Parameter(Mandatory = $true)][int]$ExpectedExitCode,
+        [bool]$ExpectMarker = $false
+    )
+    $path = Join-Path $tempRoot ($Name + '.ps1')
+    Set-Content -LiteralPath $path -Value $Script -Encoding UTF8
+    $output = (& $shellPath -NoLogo -NoProfile -ExecutionPolicy Bypass -File $path 2>&1 | Out-String)
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne $ExpectedExitCode) {
+        throw "Case '$Name' expected exit $ExpectedExitCode but saw $exitCode. Output: $output"
+    }
+    $markerSeen = $output.Contains('BRAINTRUST_MUTATION_COMPLETED')
+    if ($ExpectMarker -and -not $markerSeen) { throw "Case '$Name' expected completion marker. Output: $output" }
+    if (-not $ExpectMarker -and $markerSeen) { throw "Case '$Name' unexpectedly completed protected mutation. Output: $output" }
+}
+
+$ordinaryName = 'BraintrustCurrentLocationOrdinary'
+try {
+    Invoke-ChildCase -Name 'ordinary-set-item' -ExpectedExitCode 0 -ExpectMarker $true -Script @"
+`$ErrorActionPreference = 'Stop'
+Set-Variable -Name '$ordinaryName' -Value 'before'
+Set-Location Variable:
+Set-Item -LiteralPath '$ordinaryName' -Value 'after'
+if ((Get-Variable -Name '$ordinaryName' -ValueOnly) -ne 'after') { throw 'ordinary relative Set-Item failed' }
+Write-Output 'BRAINTRUST_MUTATION_COMPLETED'
+"@
+
+    foreach ($command in @('Set-Item','Clear-Item','Remove-Item')) {
+        $args = if ($command -eq 'Set-Item') { "-LiteralPath 'PID' -Value 1 -Force" } else { "-LiteralPath 'PID' -Force" }
+        Invoke-ChildCase -Name ($command.ToLowerInvariant() + '-pid') -ExpectedExitCode 1 -ExpectMarker $false -Script @"
+`$ErrorActionPreference = 'Stop'
+Set-Location Variable:
+$command $args
+Write-Output 'BRAINTRUST_MUTATION_COMPLETED'
+"@
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+Write-Host 'PowerShell Variable: current-location native canary PASS.' -ForegroundColor Green
