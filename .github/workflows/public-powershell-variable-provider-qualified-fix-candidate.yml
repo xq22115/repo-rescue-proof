@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/public-powershell-variable-provider-qualified-fix-candidate.yml'
       - 'diagnostics/powershell-variable-provider-qualified-fix-candidate/**'
+      - '!diagnostics/powershell-variable-provider-qualified-fix-candidate/native-tested/**'
       - 'diagnostics/powershell-automatic-variable-guard/**'
   pull_request:
     branches:
@@ -14,11 +15,12 @@ on:
     paths:
       - '.github/workflows/public-powershell-variable-provider-qualified-fix-candidate.yml'
       - 'diagnostics/powershell-variable-provider-qualified-fix-candidate/**'
+      - '!diagnostics/powershell-variable-provider-qualified-fix-candidate/native-tested/**'
       - 'diagnostics/powershell-automatic-variable-guard/**'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-2022:
@@ -110,3 +112,22 @@ jobs:
             diagnostics/powershell-variable-provider-qualified-fix-candidate/candidate-receipt.json
           if-no-files-found: error
           retention-days: 7
+      - name: Publish native-tested candidate snapshot
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_HEAD: ${{ github.sha }}
+        run: |
+          $candidate = (Resolve-Path .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1).Path
+          $bytes = [System.IO.File]::ReadAllBytes($candidate)
+          $content = [Convert]::ToBase64String($bytes)
+          $snapshotPath = "diagnostics/powershell-variable-provider-qualified-fix-candidate/native-tested/$env:SOURCE_HEAD/Test-Scripts.ps1"
+          $endpoint = "repos/$env:GITHUB_REPOSITORY/contents/$snapshotPath"
+          $body = [ordered]@{
+            message = "diagnostics: publish native-tested provider guard snapshot [skip ci]"
+            content = $content
+            branch = $env:GITHUB_REF_NAME
+          } | ConvertTo-Json -Compress
+          $body | gh api --method PUT $endpoint --input - | Out-Null
+          Write-Host "NATIVE_TESTED_PROVIDER_GUARD_SNAPSHOT=$snapshotPath"
