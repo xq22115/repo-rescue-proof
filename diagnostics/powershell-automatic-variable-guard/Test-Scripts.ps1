@@ -731,7 +731,7 @@ function Test-BraintrustVariableProviderPathTargetsAutomaticVariable {
     return $false
 }
 
-function Get-BraintrustStaticSetLocationPath {
+function Get-BraintrustStaticLocationTransitionPath {
     param(
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.Language.CommandAst]$CommandAst
@@ -746,7 +746,10 @@ function Get-BraintrustStaticSetLocationPath {
     if ($separatorIndex -ge 0) {
         $leafName = $leafName.Substring($separatorIndex + 1)
     }
-    if ($leafName -ine 'Set-Location') {
+    # Only canonical location-transition cmdlets are execution authority here.
+    # Aliases (cd/chdir/sl/pushd) are intentionally excluded until alias redefinition
+    # and command-precedence semantics have their own bounded static proof.
+    if ($leafName -ine 'Set-Location' -and $leafName -ine 'Push-Location') {
         return @()
     }
 
@@ -810,7 +813,7 @@ function Test-BraintrustImmediatelyInVariableProviderLocation {
         if ($null -eq $candidateContainer -or -not [object]::ReferenceEquals($candidateContainer, $commandContainer)) {
             continue
         }
-        $paths = @(Get-BraintrustStaticSetLocationPath -CommandAst $candidate)
+        $paths = @(Get-BraintrustStaticLocationTransitionPath -CommandAst $candidate)
         if ($paths.Count -ne 1) {
             continue
         }
