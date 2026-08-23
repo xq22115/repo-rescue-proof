@@ -19,8 +19,13 @@ function Invoke-ChildCase {
     )
     $path = Join-Path $tempRoot ($Name + '.ps1')
     Set-Content -LiteralPath $path -Value $Script -Encoding UTF8
-    $output = (& $shellPath -NoLogo -NoProfile -ExecutionPolicy Bypass -File $path 2>&1 | Out-String)
-    $exitCode = $LASTEXITCODE
+    $stdoutPath = Join-Path $tempRoot ($Name + '.stdout.txt')
+    $stderrPath = Join-Path $tempRoot ($Name + '.stderr.txt')
+    $process = Start-Process -FilePath $shellPath -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$path) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $stdout = if (Test-Path -LiteralPath $stdoutPath) { [System.IO.File]::ReadAllText($stdoutPath) } else { '' }
+    $stderr = if (Test-Path -LiteralPath $stderrPath) { [System.IO.File]::ReadAllText($stderrPath) } else { '' }
+    $output = $stdout + $stderr
+    $exitCode = [int]$process.ExitCode
     if ($exitCode -ne $ExpectedExitCode) {
         throw "Case '$Name' expected exit $ExpectedExitCode but saw $exitCode. Output: $output"
     }
