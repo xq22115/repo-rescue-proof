@@ -131,7 +131,9 @@ $providerPath = 'Variable:PID'
 Set-Item -LiteralPath $providerPath -Value 1 -Force
 '@
 
-    Invoke-BraintrustProviderLintFixture -Name 'shadowed-si-function' -ExpectedExitCode 0 -ExpectedOutputFragment 'automatic-variable collision guard' -Content @'
+    # Built-in aliases have higher command precedence than functions. A same-name
+    # function therefore does not prove that si stopped resolving to Set-Item.
+    Invoke-BraintrustProviderLintFixture -Name 'same-name-function-does-not-shadow-si-alias' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider variable 'Variable:PID'" -Content @'
 function si { param($LiteralPath, $Value) Write-Output $LiteralPath }
 si -LiteralPath 'Variable:PID' -Value 1
 '@
@@ -141,21 +143,21 @@ Set-Location Variable:
 Set-Item -LiteralPath ordinaryProviderTarget -Value 1
 '@
 
-    Invoke-BraintrustProviderLintFixture -Name 'current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider-current-location variable 'PID'" -Content @'
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-set-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider-current-location" -Content @'
 Set-Location Variable:
 Set-Item -LiteralPath PID -Value 1 -Force
 '@
 
-    Invoke-BraintrustProviderLintFixture -Name 'current-location-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "clear-item-variable-provider-current-location variable 'PID'" -Content @'
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-clear-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "clear-item-variable-provider-current-location" -Content @'
 Set-Location -Path 'Variable:'; Clear-Item -LiteralPath PID -Force
 '@
 
-    Invoke-BraintrustProviderLintFixture -Name 'current-location-remove-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "remove-item-variable-provider-current-location variable 'PID'" -Content @'
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-remove-item-pid' -ExpectedExitCode 1 -ExpectedOutputFragment "remove-item-variable-provider-current-location" -Content @'
 Microsoft.PowerShell.Management\Set-Location -LiteralPath 'Variable:'
 Remove-Item -LiteralPath PID -Force
 '@
 
-    Invoke-BraintrustProviderLintFixture -Name 'current-location-wildcard-path' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider-current-location variable 'P*'" -Content @'
+    Invoke-BraintrustProviderLintFixture -Name 'current-location-wildcard-path' -ExpectedExitCode 1 -ExpectedOutputFragment "set-item-variable-provider-current-location" -Content @'
 Set-Location Variable:
 Set-Item -Path 'P*' -Value 1 -Force
 '@
