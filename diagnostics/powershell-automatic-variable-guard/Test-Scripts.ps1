@@ -190,7 +190,7 @@ foreach ($file in $files) {
         $failed = $true
         Write-Host "[FAIL] $($file.Name) automatic-variable collision" -ForegroundColor Red
         foreach ($collision in $collisions) {
-            Write-Host ("  Line {0}, Column {1}: {2} '${3}' collides case-insensitively with a PowerShell automatic variable" -f $collision.Extent.StartLineNumber, $collision.Extent.StartColumnNumber, $collision.Kind, $collision.Variable)
+            Write-Host ("  Line {0}, Column {1}: {2} variable '{3}' collides case-insensitively with a PowerShell automatic variable" -f $collision.Extent.StartLineNumber, $collision.Extent.StartColumnNumber, $collision.Kind, $collision.Variable)
         }
         continue
     }
