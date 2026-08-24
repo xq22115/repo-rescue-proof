@@ -55,8 +55,8 @@ if ($bodySha256 -ne $expectedBodySha256) { throw "Body SHA-256 mismatch: $bodySh
 if ($frameSha256 -ne $expectedFrameSha256) { throw "Frame SHA-256 mismatch: $frameSha256" }
 if ($bodyBytes.Length -ne 286) { throw "Body byte length mismatch: $($bodyBytes.Length)" }
 if ($frameBytes.Length -ne 287) { throw "Frame byte length mismatch: $($frameBytes.Length)" }
-if (($frameBytes | Where-Object { $_ -eq 0x0A }).Count -ne 1) { throw 'Frame must contain exactly one LF byte.' }
-if (($frameBytes | Where-Object { $_ -eq 0x0D }).Count -ne 0) { throw 'Frame must not contain CR bytes.' }
+if (@($frameBytes | Where-Object { $_ -eq 0x0A }).Count -ne 1) { throw 'Frame must contain exactly one LF byte.' }
+if (@($frameBytes | Where-Object { $_ -eq 0x0D }).Count -ne 0) { throw 'Frame must not contain CR bytes.' }
 if ($frameBytes[$frameBytes.Length - 1] -ne 0x0A) { throw 'Frame must end in LF.' }
 if ($frameBytes.Length -ge 3 -and $frameBytes[0] -eq 0xEF -and $frameBytes[1] -eq 0xBB -and $frameBytes[2] -eq 0xBF) { throw 'Frame must not contain a UTF-8 BOM.' }
 
@@ -91,6 +91,7 @@ $receipt = [ordered]@{
         noEmbeddedLfBytesAccepted = $true
         noCarriageReturnBytesAccepted = $true
         utf8BomAbsentAccepted = $true
+        ps51PipelineScalarCountSafe = $true
         transportWriteObserved = $false
         mcpServerExecutionAccepted = $false
         semanticToolAccepted = $false
