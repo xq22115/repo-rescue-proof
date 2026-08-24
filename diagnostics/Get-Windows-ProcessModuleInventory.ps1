@@ -155,7 +155,7 @@ $windowsRoot = if ($env:SystemRoot) { [System.IO.Path]::GetFullPath($env:SystemR
 try {
     $modules = @($process.Modules)
 } catch {
-    throw "Unable to enumerate Process.Modules for PID $ProcessId: $($_.Exception.Message)"
+    throw "Unable to enumerate Process.Modules for PID ${ProcessId}: $($_.Exception.Message)"
 }
 if ($modules.Count -lt 1) {
     throw "Process.Modules returned no modules for PID $ProcessId."
