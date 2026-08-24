@@ -7,6 +7,10 @@ on:
     paths:
       - 'diagnostics/windows-processmodules-bitness-canary.ps1'
       - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
+  pull_request:
+    paths:
+      - 'diagnostics/windows-processmodules-bitness-canary.ps1'
+      - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Windows PowerShell 5.1 cross-bitness canary
         shell: powershell
         run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-2022-ps51.json
@@ -37,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Windows PowerShell 5.1 cross-bitness canary
         shell: powershell
         run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-latest-ps51.json
