@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "components": {
+    "powershell-transport-broker": {
+      "repository": "PowerShell/PowerShell",
+      "tag": "v7.6.5",
+      "sha256Sums": {
+        "name": "hashes.sha256",
+        "sha256": "c01275fd380911ef2adfdaf04f04e3e06872dc0112e401de18a88dd3ddc055d8"
+      },
+      "assets": {
+        "windows-amd64": {
+          "name": "PowerShell-7.6.5-win-x64.zip",
+          "sha256": "32eb8f6cdce08f86e987d625a2733e54ac3e289ae7e1621b14c0b5bcec2434ea"
+        },
+        "windows-arm64": {
+          "name": "PowerShell-7.6.5-win-arm64.zip",
+          "sha256": "20514a755d16428dc4355c85e0883c859531e71cc3e122670aa1fccdbf96ba7e"
+        }
+      }
+    }
+  }
+}
