@@ -6,10 +6,14 @@ on:
       - diagnostic/windows-processmodules-bitness-20260824
     paths:
       - 'diagnostics/windows-processmodules-bitness-canary.ps1'
+      - 'diagnostics/Get-Windows-ProcessModulesArchitectureEvidence.ps1'
+      - 'diagnostics/test-processmodules-architecture-helper.ps1'
       - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
   pull_request:
     paths:
       - 'diagnostics/windows-processmodules-bitness-canary.ps1'
+      - 'diagnostics/Get-Windows-ProcessModulesArchitectureEvidence.ps1'
+      - 'diagnostics/test-processmodules-architecture-helper.ps1'
       - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
   workflow_dispatch:
 
@@ -30,10 +34,16 @@ jobs:
       - name: PowerShell 7 cross-bitness canary
         shell: pwsh
         run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-2022-ps7.json
+      - name: Windows PowerShell 5.1 architecture helper contract
+        shell: powershell
+        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps51
+      - name: PowerShell 7 architecture helper contract
+        shell: pwsh
+        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps7
       - uses: actions/upload-artifact@v4
         with:
           name: processmodules-bitness-windows-2022
-          path: artifacts/*.json
+          path: artifacts/**/*.json
 
   windows-latest:
     runs-on: windows-latest
@@ -48,7 +58,13 @@ jobs:
       - name: PowerShell 7 cross-bitness canary
         shell: pwsh
         run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-latest-ps7.json
+      - name: Windows PowerShell 5.1 architecture helper contract
+        shell: powershell
+        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps51
+      - name: PowerShell 7 architecture helper contract
+        shell: pwsh
+        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps7
       - uses: actions/upload-artifact@v4
         with:
           name: processmodules-bitness-windows-latest
-          path: artifacts/*.json
+          path: artifacts/**/*.json
