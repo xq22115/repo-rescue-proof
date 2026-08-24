@@ -32,8 +32,9 @@ $request = [ordered]@{
 }
 
 $expectedJson = '{"id":"approval-decision:11111111-1111-1111-1111-111111111111","jsonrpc":"2.0","method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/protocolVersion":"2026-07-28"},"arguments":{"query":"windows mcp","topK":5},"name":"search"}}'
-$expectedBodySha256 = 'fbb6d99839cea5293511dda12e9d5f7c7166091e35e47abc2c1e9e125b2667b1'
-$expectedFrameSha256 = 'd245f01581a5584b5c01b154a4c3d646013d37c98c7abaa6ab243926b02ceced'
+# These constants were independently recomputed from the literal UTF-8 bytes of $expectedJson.
+$expectedBodySha256 = '43851d9bf1d04cc02c8e058935d339d9f1a562f012532bb548689a572ee512d6'
+$expectedFrameSha256 = '11907df6b04f6290de10403d1df67c8937654e5a0e6853b62578fce0079af0c5'
 
 $json = $request | ConvertTo-Json -Depth 20 -Compress
 if (-not [string]::Equals($json, $expectedJson, [System.StringComparison]::Ordinal)) {
@@ -52,8 +53,8 @@ $bodySha256 = Get-Sha256 $bodyBytes
 $frameSha256 = Get-Sha256 $frameBytes
 if ($bodySha256 -ne $expectedBodySha256) { throw "Body SHA-256 mismatch: $bodySha256" }
 if ($frameSha256 -ne $expectedFrameSha256) { throw "Frame SHA-256 mismatch: $frameSha256" }
-if ($bodyBytes.Length -ne 289) { throw "Body byte length mismatch: $($bodyBytes.Length)" }
-if ($frameBytes.Length -ne 290) { throw "Frame byte length mismatch: $($frameBytes.Length)" }
+if ($bodyBytes.Length -ne 286) { throw "Body byte length mismatch: $($bodyBytes.Length)" }
+if ($frameBytes.Length -ne 287) { throw "Frame byte length mismatch: $($frameBytes.Length)" }
 if (($frameBytes | Where-Object { $_ -eq 0x0A }).Count -ne 1) { throw 'Frame must contain exactly one LF byte.' }
 if (($frameBytes | Where-Object { $_ -eq 0x0D }).Count -ne 0) { throw 'Frame must not contain CR bytes.' }
 if ($frameBytes[$frameBytes.Length - 1] -ne 0x0A) { throw 'Frame must end in LF.' }
