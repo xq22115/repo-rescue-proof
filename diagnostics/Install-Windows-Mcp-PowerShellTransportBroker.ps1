@@ -127,7 +127,9 @@ try {
     Assert-True ([string]$signature.Status -eq 'Valid') "Extracted pwsh.exe Authenticode signature is not Valid: $($signature.Status)."
     Assert-True ($null -ne $signature.SignerCertificate) 'Extracted pwsh.exe did not expose a signer certificate.'
 
-    $probeScript = '$e=[string]$PSVersionTable.PSEdition;$v=[string]$PSVersionTable.PSVersion;$f=[string][System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription;$p=([System.Diagnostics.ProcessStartInfo].GetProperty("StandardInputEncoding") -ne $null);[ordered]@{edition=$e;version=$v;framework=$f;hasStandardInputEncoding=$p}|ConvertTo-Json -Compress'
+    # This probe string is intentionally single-quoted at the outer PowerShell 5.1 layer.
+    # Single quotes inside the child script are escaped by doubling them; backslash is not a PowerShell quote escape.
+    $probeScript = '$e=[string]$PSVersionTable.PSEdition;$v=[string]$PSVersionTable.PSVersion;$f=[string][System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription;$p=([System.Diagnostics.ProcessStartInfo].GetProperty(''StandardInputEncoding'') -ne $null);[ordered]@{edition=$e;version=$v;framework=$f;hasStandardInputEncoding=$p}|ConvertTo-Json -Compress'
     $probeOutput = @(& $stagedPwshPath -NoLogo -NoProfile -NonInteractive -Command $probeScript 2>&1)
     $probeExitCode = $LASTEXITCODE
     Assert-True ($probeExitCode -eq 0) "Extracted pwsh.exe runtime probe failed with exit code $probeExitCode."
@@ -142,7 +144,7 @@ try {
     $versionParent = Split-Path -Parent $architectureRoot
     if (-not (Test-Path -LiteralPath $versionParent -PathType Container)) { New-Item -ItemType Directory -Path $versionParent -Force | Out-Null }
     if (Test-Path -LiteralPath $architectureRoot) { Remove-Item -LiteralPath $architectureRoot -Recurse -Force }
-    Move-Item -LiteralPath $stagingRoot -DestinationPath $architectureRoot
+    Move-Item -LiteralPath $stagingRoot -Destination $architectureRoot
     $installedPwshPath = [System.IO.Path]::GetFullPath((Join-Path $architectureRoot $relativePwshPath))
     Assert-True (Test-Path -LiteralPath $installedPwshPath -PathType Leaf) 'Installed PowerShell transport broker executable was not found after directory move.'
     $installedPwshSha = Get-FileSha256 $installedPwshPath
