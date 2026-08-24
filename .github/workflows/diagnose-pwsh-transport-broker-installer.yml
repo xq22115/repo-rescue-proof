@@ -69,9 +69,19 @@ jobs:
           if (-not $pwshPath.StartsWith(([IO.Path]::GetFullPath($installBase).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Installed pwsh.exe escaped the diagnostic install root.' }
           $observedSha = (Get-FileHash -LiteralPath $pwshPath -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($observedSha -ne [string]$receipt.installedBroker.executableSha256) { throw 'Installed pwsh.exe SHA read-back drifted.' }
-          $childProbeScript = '$e=[string]$PSVersionTable.PSEdition;$v=[string]$PSVersionTable.PSVersion;$p=([System.Diagnostics.ProcessStartInfo].GetProperty(''StandardInputEncoding'') -ne $null);"$e|$v|$p"'
-          $probe = & $pwshPath -NoLogo -NoProfile -NonInteractive -Command $childProbeScript
-          if (($probe | Out-String).Trim() -ne 'Core|7.6.5|True') { throw "Installed broker re-probe failed: $probe" }
+          $probeScriptPath = Join-Path $env:RUNNER_TEMP ('installed-pwsh-probe-' + [guid]::NewGuid().ToString('N') + '.ps1')
+          @'
+          [ordered]@{
+            edition = [string]$PSVersionTable.PSEdition
+            version = [string]$PSVersionTable.PSVersion
+            hasStandardInputEncoding = ([System.Diagnostics.ProcessStartInfo].GetProperty('StandardInputEncoding') -ne $null)
+          } | ConvertTo-Json -Compress
+          '@ | Set-Content -LiteralPath $probeScriptPath -Encoding UTF8
+          $probeJson = (& $pwshPath -NoLogo -NoProfile -NonInteractive -File $probeScriptPath | Out-String).Trim()
+          $probe = $probeJson | ConvertFrom-Json
+          if ([string]$probe.edition -ne 'Core' -or [string]$probe.version -ne '7.6.5' -or -not [bool]$probe.hasStandardInputEncoding) {
+            throw "Installed broker re-probe failed: $probeJson"
+          }
           Write-Host 'PWSH_BROKER_NATIVE_INSTALL=PASS'
           Write-Host "BOOTSTRAP_POWERSHELL=$($PSVersionTable.PSVersion)"
           Write-Host "INSTALLED_PWSH=$pwshPath"
