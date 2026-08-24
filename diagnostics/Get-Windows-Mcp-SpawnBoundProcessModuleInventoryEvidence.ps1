@@ -72,19 +72,19 @@ function Get-LiveProcessObservation([int]$ProcessId, [string]$ExpectedPath, [str
     $process = Get-Process -Id $ProcessId -ErrorAction Stop
     try {
         $process.Refresh()
-        Assert-True (-not $process.HasExited) "$Phase: process $ProcessId is no longer running."
+        Assert-True (-not $process.HasExited) "${Phase}: process $ProcessId is no longer running."
         $path = $null
         try { $path = [string]$process.Path } catch { }
         if ([string]::IsNullOrWhiteSpace($path)) {
             try { $path = [string]$process.MainModule.FileName } catch { }
         }
-        Assert-True (-not [string]::IsNullOrWhiteSpace($path)) "$Phase: unable to read process image path for PID $ProcessId."
+        Assert-True (-not [string]::IsNullOrWhiteSpace($path)) "${Phase}: unable to read process image path for PID $ProcessId."
         $path = [System.IO.Path]::GetFullPath($path)
-        Assert-True ($path.Equals($ExpectedPath, [System.StringComparison]::OrdinalIgnoreCase)) "$Phase: live process image path no longer matches spawned-process identity."
+        Assert-True ($path.Equals($ExpectedPath, [System.StringComparison]::OrdinalIgnoreCase)) "${Phase}: live process image path no longer matches spawned-process identity."
         $sha = Get-FileSha256 $path
-        Assert-True ($sha -eq $ExpectedSha256) "$Phase: live process image SHA-256 no longer matches spawned-process identity."
+        Assert-True ($sha -eq $ExpectedSha256) "${Phase}: live process image SHA-256 no longer matches spawned-process identity."
         $start = ([datetimeoffset]$process.StartTime).ToUniversalTime()
-        Assert-True ($start.UtcTicks -eq $ExpectedStartUtc.UtcTicks) "$Phase: live process StartTime no longer matches spawned-process identity; PID reuse or lifetime drift is not accepted."
+        Assert-True ($start.UtcTicks -eq $ExpectedStartUtc.UtcTicks) "${Phase}: live process StartTime no longer matches spawned-process identity; PID reuse or lifetime drift is not accepted."
         return [pscustomobject][ordered]@{
             pid = $ProcessId
             startTimeUtc = $start.ToString('o')
