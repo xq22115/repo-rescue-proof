@@ -18,8 +18,22 @@ function Get-BytesSha256([byte[]]$Bytes) {
     }
 }
 
+function Import-ProtectedDataType {
+    if ('System.Security.Cryptography.ProtectedData' -as [type]) { return 'already-loaded' }
+    foreach ($assemblyName in @('System.Security', 'System.Security.Cryptography.ProtectedData')) {
+        try {
+            Add-Type -AssemblyName $assemblyName -ErrorAction Stop
+        } catch {
+            continue
+        }
+        if ('System.Security.Cryptography.ProtectedData' -as [type]) { return $assemblyName }
+    }
+    throw 'Unable to load System.Security.Cryptography.ProtectedData on native Windows.'
+}
+
 Assert-True ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) 'DPAPI approval-decision canary requires native Windows.'
 Assert-True ($env:RUNNER_OS -eq 'Windows') 'GitHub runner context must report Windows.'
+$protectedDataAssemblySource = Import-ProtectedDataType
 
 $decision = [ordered]@{
     schemaVersion = 1
@@ -46,15 +60,11 @@ $unprotectedBytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
     [System.Security.Cryptography.DataProtectionScope]::CurrentUser
 )
 Assert-True ($unprotectedBytes.Length -eq $plainBytes.Length) 'DPAPI round-trip byte length differs.'
-for ($i = 0; $i -lt $plainBytes.Length; $i++) {
-    if ($plainBytes[$i] -ne $unprotectedBytes[$i]) {
-        throw "DPAPI round-trip byte mismatch at offset $i."
-    }
-}
+Assert-True ((Get-BytesSha256 $unprotectedBytes) -eq (Get-BytesSha256 $plainBytes)) 'DPAPI round-trip SHA-256 differs.'
 
 $tamperedBytes = New-Object byte[] $protectedBytes.Length
 [Array]::Copy($protectedBytes, $tamperedBytes, $protectedBytes.Length)
-$tamperIndex = [Math]::Max(0, [Math]::Floor($tamperedBytes.Length / 2))
+$tamperIndex = [Math]::Max(0, [int][Math]::Floor($tamperedBytes.Length / 2))
 $tamperedBytes[$tamperIndex] = $tamperedBytes[$tamperIndex] -bxor 0x01
 $tamperRejected = $false
 try {
@@ -63,16 +73,14 @@ try {
         $entropy,
         [System.Security.Cryptography.DataProtectionScope]::CurrentUser
     )
-    if (-not [System.Linq.Enumerable]::SequenceEqual([byte[]]$unexpectedPlaintext, [byte[]]$plainBytes)) {
-        $tamperRejected = $true
-    }
+    $tamperRejected = ((Get-BytesSha256 $unexpectedPlaintext) -ne (Get-BytesSha256 $plainBytes))
 } catch [System.Security.Cryptography.CryptographicException] {
     $tamperRejected = $true
 }
 Assert-True $tamperRejected 'Tampered CurrentUser DPAPI blob was not rejected or changed on unprotect.'
 
 $output = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     component = 'public-windows-dpapi-approval-decision-canary'
     generatedAtUtc = [datetime]::UtcNow.ToString('o')
     environment = [ordered]@{
@@ -82,6 +90,7 @@ $output = [ordered]@{
         osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
         psEdition = $PSVersionTable.PSEdition
         psVersion = $PSVersionTable.PSVersion.ToString()
+        protectedDataAssemblySource = $protectedDataAssemblySource
     }
     dpapi = [ordered]@{
         scope = 'CurrentUser'
@@ -108,4 +117,4 @@ $output = [ordered]@{
 $outputDirectory = Split-Path -Parent ([System.IO.Path]::GetFullPath($OutputPath))
 if ($outputDirectory) { New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null }
 [System.IO.File]::WriteAllText([System.IO.Path]::GetFullPath($OutputPath), ($output | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "DPAPI approval-decision canary PASS: $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion) / $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)"
+Write-Host "DPAPI approval-decision canary PASS: $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion) / $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) / ProtectedData=$protectedDataAssemblySource"
