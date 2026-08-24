@@ -57,7 +57,7 @@ jobs:
 
           $expected = @{
             'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1' = 'e15948dfa1e308c06250433ddf8c3d4718b3aa5b'
-            'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1' = '3909d8045147b6ef4826500c8c4b407a9149cfc7'
+            'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1' = '03017f8125baf56eae4046441e50356f7c643be5'
             'diagnostics/Get-Windows-ProcessModuleInventory.ps1' = '9481e1b4d25ec3977614b554d252aa84275dca48'
           }
           foreach ($path in $expected.Keys) {
