@@ -34,7 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $observed = (git hash-object diagnostics/Get-Windows-ProcessModuleInventory.ps1).Trim()
-          if ($observed -ne '765df91ecd81747ec827b435773b6827b0be13a1') { throw "Integrated helper blob drifted: $observed" }
+          if ($observed -ne '9481e1b4d25ec3977614b554d252aa84275dca48') { throw "Integrated helper blob drifted: $observed" }
           Write-Host "MODULE_INVENTORY_V2_GIT_BLOB=$observed"
       - name: Windows PowerShell 5.1 cross-bitness canary
         shell: powershell
@@ -84,7 +84,7 @@ jobs:
         shell: pwsh
         run: |
           $observed = (git hash-object diagnostics/Get-Windows-ProcessModuleInventory.ps1).Trim()
-          if ($observed -ne '765df91ecd81747ec827b435773b6827b0be13a1') { throw "Integrated helper blob drifted: $observed" }
+          if ($observed -ne '9481e1b4d25ec3977614b554d252aa84275dca48') { throw "Integrated helper blob drifted: $observed" }
           Write-Host "MODULE_INVENTORY_V2_GIT_BLOB=$observed"
       - name: Windows PowerShell 5.1 cross-bitness canary
         shell: powershell
