@@ -1,0 +1,50 @@
+name: Diagnose Process.Modules cross-bitness completeness
+
+on:
+  push:
+    branches:
+      - diagnostic/windows-processmodules-bitness-20260824
+    paths:
+      - 'diagnostics/windows-processmodules-bitness-canary.ps1'
+      - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-2022:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+      - name: Windows PowerShell 5.1 cross-bitness canary
+        shell: powershell
+        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-2022-ps51.json
+      - name: PowerShell 7 cross-bitness canary
+        shell: pwsh
+        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-2022-ps7.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: processmodules-bitness-windows-2022
+          path: artifacts/*.json
+
+  windows-latest:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+      - name: Windows PowerShell 5.1 cross-bitness canary
+        shell: powershell
+        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-latest-ps51.json
+      - name: PowerShell 7 cross-bitness canary
+        shell: pwsh
+        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-latest-ps7.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: processmodules-bitness-windows-latest
+          path: artifacts/*.json
