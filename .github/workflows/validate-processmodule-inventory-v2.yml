@@ -1,0 +1,126 @@
+name: Validate Process.Modules Inventory V2
+
+on:
+  push:
+    branches:
+      - diagnostic/windows-processmodules-bitness-20260824
+    paths:
+      - 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
+      - '.github/workflows/validate-processmodule-inventory-v2.yml'
+  pull_request:
+    paths:
+      - 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
+      - '.github/workflows/validate-processmodule-inventory-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-inventory:
+    name: ${{ matrix.image }} / ${{ matrix.shell }}
+    runs-on: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: windows-2022
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-2022
+            shell: pwsh
+            expectedEdition: Core
+          - image: windows-latest
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-latest
+            shell: pwsh
+            expectedEdition: Core
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact diagnostic revision and helper blob
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $observedHead = (git rev-parse HEAD).Trim()
+          if ($observedHead -ne $env:EXPECTED_HEAD_SHA) { throw "Checkout head mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$observedHead" }
+          $observedBlob = (git hash-object diagnostics/Get-Windows-ProcessModuleInventory.ps1).Trim()
+          if ($observedBlob -ne '765df91ecd81747ec827b435773b6827b0be13a1') { throw "Integrated module-inventory helper blob drifted: $observedBlob" }
+          Write-Host "DIAGNOSTIC_HEAD=$observedHead"
+          Write-Host "MODULE_INVENTORY_HELPER_GIT_BLOB=$observedBlob"
+
+      - name: Run integrated schema-v2 module inventory
+        shell: ${{ matrix.shell }}
+        env:
+          EXPECTED_EDITION: ${{ matrix.expectedEdition }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          if ([string]$PSVersionTable.PSEdition -ne $env:EXPECTED_EDITION) {
+            throw "Unexpected PowerShell edition. expected=$env:EXPECTED_EDITION actual=$($PSVersionTable.PSEdition)"
+          }
+
+          $helper = Join-Path $PWD 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
+          $current = Get-Process -Id $PID -ErrorAction Stop
+          $currentPath = $null
+          try { $currentPath = [string]$current.Path } catch { }
+          if ([string]::IsNullOrWhiteSpace($currentPath)) {
+            try { $currentPath = [string]$current.MainModule.FileName } catch { }
+          }
+          if ([string]::IsNullOrWhiteSpace($currentPath)) { throw 'Unable to resolve current PowerShell process image path.' }
+          $currentPath = [System.IO.Path]::GetFullPath($currentPath)
+          $currentSha = (Get-FileHash -LiteralPath $currentPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $receiptPath = Join-Path $env:RUNNER_TEMP ("module-inventory-v2-" + [guid]::NewGuid().ToString('N') + '.json')
+
+          $result = & $helper -ProcessId $PID -ExpectedExecutablePath $currentPath -ExpectedExecutableSha256 $currentSha -OutputReceiptPath $receiptPath
+          if (-not $result.moduleInventorySnapshotAccepted) { throw 'Integrated module inventory did not accept the snapshot.' }
+          if (-not $result.processModulesSameArchitecturePrerequisiteAccepted) { throw 'Same-architecture prerequisite was not accepted.' }
+          if ($result.processModulesEnumerationCompletenessProven) { throw 'Process.Modules completeness must remain explicitly unproven.' }
+          if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw 'Module inventory receipt was not persisted.' }
+
+          $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ([int]$receipt.schemaVersion -ne 2) { throw "Unexpected schemaVersion: $($receipt.schemaVersion)" }
+          if ([string]$receipt.component -ne 'windows-process-module-inventory') { throw "Unexpected component: $($receipt.component)" }
+          if ([string]$receipt.verifier.architectureObservationMethod -ne 'IsWow64Process2') { throw 'Architecture observation method drifted.' }
+          if ([int]$receipt.verifier.effectiveMachineRaw -ne [int]$receipt.process.effectiveMachineRaw) { throw 'Verifier/target effective machine mismatch.' }
+          if (-not [bool]$receipt.processModulesArchitecture.sameArchitecturePrerequisiteAccepted) { throw 'Receipt did not preserve accepted architecture prerequisite.' }
+          if ([bool]$receipt.processModulesArchitecture.enumerationCompletenessProven) { throw 'Architecture receipt overclaimed module enumeration completeness.' }
+          if ([bool]$receipt.acceptanceBoundary.processModulesEnumerationCompletenessProven) { throw 'Acceptance boundary overclaimed Process.Modules completeness.' }
+          if ([bool]$receipt.acceptanceBoundary.dependentModuleTrustAccepted) { throw 'Module inventory must not overclaim dependent-module trust.' }
+          if ([bool]$receipt.acceptanceBoundary.moduleSetStableAcrossMultipleSnapshots) { throw 'Single inventory must not overclaim module-set stability.' }
+          if ([bool]$receipt.acceptanceBoundary.semanticMcpFunctionalityAccepted) { throw 'Module inventory must not overclaim MCP semantics.' }
+          if ([bool]$receipt.acceptanceBoundary.windowsFinalStateAccepted) { throw 'Module inventory must not overclaim final Windows state.' }
+
+          $modules = @($receipt.moduleInventory.modules)
+          if ($modules.Count -lt 1) { throw 'No modules were returned.' }
+          if ([int]$receipt.moduleInventory.moduleCount -ne $modules.Count) { throw 'Declared module count does not match actual records.' }
+          if ([string]$receipt.moduleInventory.moduleSetFingerprintSha256 -notmatch '^[0-9a-f]{64}$') { throw 'Module-set fingerprint is invalid.' }
+          $main = @($modules | Where-Object { [bool]$_.isMainExecutable })
+          if ($main.Count -ne 1) { throw "Expected exactly one main executable module; actual=$($main.Count)" }
+          if (-not ([System.IO.Path]::GetFullPath([string]$main[0].path)).Equals($currentPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Main executable path mismatch.' }
+          if ([string]$main[0].sha256 -ne $currentSha) { throw 'Main executable SHA mismatch.' }
+
+          Write-Host 'INTEGRATED_PROCESS_MODULE_INVENTORY_V2=PASS'
+          Write-Host "POWERSHELL_EDITION=$($PSVersionTable.PSEdition)"
+          Write-Host "POWERSHELL_VERSION=$($PSVersionTable.PSVersion)"
+          Write-Host "EFFECTIVE_MACHINE=$($receipt.process.effectiveMachine)"
+          Write-Host "MODULE_COUNT=$($receipt.moduleInventory.moduleCount)"
+          Write-Host "MODULE_SET_FINGERPRINT_SHA256=$($receipt.moduleInventory.moduleSetFingerprintSha256)"
+
+      - name: State acceptance boundary
+        shell: pwsh
+        run: |
+          @'
+          ## Integrated Process.Modules inventory v2 diagnostic
+
+          - This run executes the exact private production helper bytes on native GitHub-hosted Windows.
+          - It proves the same-architecture prerequisite is enforced before the accepted module snapshot and that schema-v2 evidence is structurally coherent for the current PowerShell process.
+          - It does **not** prove Process.Modules completeness, dependent-module trust, module-set stability, mapped-image attestation, ODR integration, MCP semantics, or final Windows state.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
