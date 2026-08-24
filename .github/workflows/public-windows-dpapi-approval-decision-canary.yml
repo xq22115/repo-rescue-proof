@@ -1,0 +1,49 @@
+name: Public Windows DPAPI Approval Decision Canary
+
+on:
+  pull_request:
+    paths:
+      - 'diagnostics/windows-dpapi-approval-decision-canary/**'
+      - '.github/workflows/public-windows-dpapi-approval-decision-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dpapi-canary:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact checkout revision
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_HEAD_SHA) { throw "HEAD mismatch: $actual != $env:EXPECTED_HEAD_SHA" }
+
+      - name: Run DPAPI canary on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\diagnostics\windows-dpapi-approval-decision-canary\Test-Windows-DpapiApprovalDecisionCanary.ps1 -OutputPath "artifacts\${{ matrix.os }}-ps51.json"
+
+      - name: Run DPAPI canary on PowerShell 7
+        shell: pwsh
+        run: |
+          .\diagnostics\windows-dpapi-approval-decision-canary\Test-Windows-DpapiApprovalDecisionCanary.ps1 -OutputPath "artifacts\${{ matrix.os }}-ps7.json"
+
+      - name: Upload DPAPI canary evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dpapi-approval-decision-${{ matrix.os }}
+          path: artifacts/*.json
+          if-no-files-found: error
