@@ -1,0 +1,57 @@
+name: Windows Pre-Wire Process Revalidation Diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'windows/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1'
+      - 'windows/Get-Windows-Mcp-PreWireProcessIdentityRevalidation.ps1'
+      - 'windows/Test-Windows-Mcp-PreWireProcessIdentityRevalidation.ps1'
+      - '.github/workflows/windows-prewire-process-revalidation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact diagnostic PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Read back exact checked-out revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "checkout mismatch: expected=$env:EXPECTED_SHA actual=$actual" }
+
+      - name: Windows PowerShell 5.1 pre-wire process revalidation
+        shell: powershell
+        run: |
+          $output = & .\windows\Test-Windows-Mcp-PreWireProcessIdentityRevalidation.ps1
+          $output | Set-Content -LiteralPath "$env:RUNNER_TEMP\prewire-ps51.json" -Encoding UTF8
+          $output
+
+      - name: PowerShell 7 pre-wire process revalidation
+        shell: pwsh
+        run: |
+          $output = & .\windows\Test-Windows-Mcp-PreWireProcessIdentityRevalidation.ps1
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\prewire-ps7.json", ($output -join [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+          $output
+
+      - name: Upload native evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: prewire-process-revalidation-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}\prewire-ps51.json
+            ${{ runner.temp }}\prewire-ps7.json
+          if-no-files-found: error
