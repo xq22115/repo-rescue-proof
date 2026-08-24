@@ -58,6 +58,7 @@ $pB = Start-Process -FilePath $hostExe -ArgumentList $argsB -PassThru -WindowSty
 $pA.WaitForExit(30000) | Out-Null
 $pB.WaitForExit(30000) | Out-Null
 Assert-True ($pA.HasExited -and $pB.HasExited) 'Concurrent claim workers did not exit within the bound.'
+Assert-True ($pA.ExitCode -eq 0 -and $pB.ExitCode -eq 0) "Concurrent claim worker exited nonzero: A=$($pA.ExitCode), B=$($pB.ExitCode)."
 Assert-True (Test-Path -LiteralPath $resultA -PathType Leaf) 'Worker A did not record a result.'
 Assert-True (Test-Path -LiteralPath $resultB -PathType Leaf) 'Worker B did not record a result.'
 $results = @((Get-Content -LiteralPath $resultA -Raw),(Get-Content -LiteralPath $resultB -Raw))
@@ -90,6 +91,7 @@ $evidence = [ordered]@{
     }
     observation = [ordered]@{
         localFixedDriveObserved = $true
+        workerExitCodesZeroObserved = $true
         concurrentCreateNewExactlyOneWinnerObserved = $true
         concurrentReplayBlockedObserved = $true
         serialReplayBlockedWhileClaimExistsObserved = $true
