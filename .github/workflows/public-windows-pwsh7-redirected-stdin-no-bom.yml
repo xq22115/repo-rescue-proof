@@ -7,12 +7,16 @@ on:
     paths:
       - diagnostics/read-stdin-raw.ps1
       - diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1
+      - diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1
+      - diagnostics/test-spawned-process-identity.ps1
       - .github/workflows/public-windows-pwsh7-redirected-stdin-no-bom.yml
   pull_request:
     branches: [main]
     paths:
       - diagnostics/read-stdin-raw.ps1
       - diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1
+      - diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1
+      - diagnostics/test-spawned-process-identity.ps1
       - .github/workflows/public-windows-pwsh7-redirected-stdin-no-bom.yml
   workflow_dispatch:
 
@@ -43,9 +47,16 @@ jobs:
         shell: pwsh
         run: |
           ./diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1 -ReceiptPath "artifacts/pwsh7-stdin-${{ matrix.os }}.json"
-      - name: Upload diagnostic receipt
+      - name: Verify spawned process identity binding
+        shell: pwsh
+        run: |
+          ./diagnostics/test-spawned-process-identity.ps1 -ReceiptPath "artifacts/spawned-process-${{ matrix.os }}.json"
+      - name: Upload diagnostic receipts
         uses: actions/upload-artifact@v4
         with:
-          name: pwsh7-stdin-${{ matrix.os }}-${{ github.run_id }}
-          path: artifacts/pwsh7-stdin-${{ matrix.os }}.json
+          name: pwsh7-stdin-process-identity-${{ matrix.os }}-${{ github.run_id }}
+          path: |
+            artifacts/pwsh7-stdin-${{ matrix.os }}.json
+            artifacts/spawned-process-${{ matrix.os }}.json
+            artifacts/spawned-process-canary-summary.json
           if-no-files-found: error
