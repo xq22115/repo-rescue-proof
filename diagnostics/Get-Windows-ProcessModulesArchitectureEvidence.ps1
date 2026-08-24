@@ -36,18 +36,18 @@ function Get-MachineName([uint16]$Machine) {
     }
 }
 
-function Get-MachineObservation([int]$Pid) {
-    $process = Get-Process -Id $Pid -ErrorAction Stop
+function Get-MachineObservation([int]$TargetProcessId) {
+    $process = Get-Process -Id $TargetProcessId -ErrorAction Stop
     try {
         [uint16]$processMachine = 0
         [uint16]$nativeMachine = 0
         $ok = [BraintrustProcessArchitectureNative]::IsWow64Process2($process.Handle, [ref]$processMachine, [ref]$nativeMachine)
         if (-not $ok) {
-            throw "IsWow64Process2 failed for PID $Pid; Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+            throw "IsWow64Process2 failed for PID $TargetProcessId; Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
         }
         [uint16]$effective = if ($processMachine -eq 0) { $nativeMachine } else { $processMachine }
         return [pscustomobject][ordered]@{
-            pid = $Pid
+            pid = $TargetProcessId
             processMachine = Get-MachineName $processMachine
             nativeMachine = Get-MachineName $nativeMachine
             effectiveMachine = Get-MachineName $effective
@@ -60,8 +60,8 @@ function Get-MachineObservation([int]$Pid) {
     }
 }
 
-$verifier = Get-MachineObservation -Pid $PID
-$target = Get-MachineObservation -Pid $ProcessId
+$verifier = Get-MachineObservation -TargetProcessId $PID
+$target = Get-MachineObservation -TargetProcessId $ProcessId
 $match = ([int]$verifier.effectiveMachineRaw -eq [int]$target.effectiveMachineRaw)
 
 $receipt = [ordered]@{
