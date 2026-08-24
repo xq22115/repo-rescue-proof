@@ -21,7 +21,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, windows-latest]
+        include:
+          - os: windows-2022
+            edition: ps51
+            shell_name: powershell
+            expect_standard_input_encoding: unavailable
+          - os: windows-2022
+            edition: ps7
+            shell_name: pwsh
+            expect_standard_input_encoding: available
+          - os: windows-latest
+            edition: ps51
+            shell_name: powershell
+            expect_standard_input_encoding: unavailable
+          - os: windows-latest
+            edition: ps7
+            shell_name: pwsh
+            expect_standard_input_encoding: available
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout exact source revision
@@ -38,19 +54,34 @@ jobs:
           if ($actual -ne $env:EXPECTED_HEAD_SHA) { throw "HEAD mismatch: $actual != $env:EXPECTED_HEAD_SHA" }
           "MCP_STDIO_WRITE_CANARY_EXACT_HEAD=$actual" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Run single-write canary on Windows PowerShell 5.1
-        shell: powershell
+      - name: Verify redirected-stdin behavior
+        shell: ${{ matrix.shell_name }}
+        env:
+          EXPECT_STANDARD_INPUT_ENCODING: ${{ matrix.expect_standard_input_encoding }}
         run: |
-          .\diagnostics\mcp-stdio-write-canary\Test-Mcp-StdioWriteCanary.ps1 -OutputPath "artifacts\${{ matrix.os }}-ps51.json"
-
-      - name: Run single-write canary on PowerShell 7
-        shell: pwsh
-        run: |
-          .\diagnostics\mcp-stdio-write-canary\Test-Mcp-StdioWriteCanary.ps1 -OutputPath "artifacts\${{ matrix.os }}-ps7.json"
+          $output = "artifacts\${{ matrix.os }}-${{ matrix.edition }}.json"
+          if ($env:EXPECT_STANDARD_INPUT_ENCODING -eq 'unavailable') {
+            $caught = $null
+            try {
+              .\diagnostics\mcp-stdio-write-canary\Test-Mcp-StdioWriteCanary.ps1 -OutputPath $output
+            } catch {
+              $caught = $_
+            }
+            if ($null -eq $caught) {
+              throw 'Windows PowerShell 5.1 unexpectedly completed the no-BOM Process.StandardInput canary; update the diagnostic contract before accepting this behavior change.'
+            }
+            if ($caught.Exception.Message -notmatch 'StandardInputEncoding') {
+              throw "Windows PowerShell 5.1 failed for an unexpected reason: $($caught.Exception.Message)"
+            }
+            Write-Host 'MCP_STDIO_PS51_STANDARDINPUTENCODING_UNAVAILABLE_CONFIRMED'
+          } else {
+            .\diagnostics\mcp-stdio-write-canary\Test-Mcp-StdioWriteCanary.ps1 -OutputPath $output
+          }
 
       - name: Upload stdio single-write evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-stdio-single-write-${{ matrix.os }}
+          name: mcp-stdio-single-write-${{ matrix.os }}-${{ matrix.edition }}
           path: artifacts/*.json
-          if-no-files-found: error
+          if-no-files-found: warn
