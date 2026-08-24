@@ -129,3 +129,5 @@ jobs:
           - Accepts only same observed PID lifetime (PID + StartTime + image path/SHA) around module inventory.
           - Does not prove race-free lifetime binding, Process.Modules completeness, module trust, late-load coverage, downstream MCP server identity, protocol health, semantics, or final Windows state.
           '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+# Revalidation marker: 2026-08-25 native spawn-bound matrix.
