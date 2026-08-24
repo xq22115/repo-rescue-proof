@@ -69,7 +69,8 @@ jobs:
           if (-not $pwshPath.StartsWith(([IO.Path]::GetFullPath($installBase).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Installed pwsh.exe escaped the diagnostic install root.' }
           $observedSha = (Get-FileHash -LiteralPath $pwshPath -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($observedSha -ne [string]$receipt.installedBroker.executableSha256) { throw 'Installed pwsh.exe SHA read-back drifted.' }
-          $probe = & $pwshPath -NoLogo -NoProfile -NonInteractive -Command '$e=[string]$PSVersionTable.PSEdition;$v=[string]$PSVersionTable.PSVersion;$p=([System.Diagnostics.ProcessStartInfo].GetProperty("StandardInputEncoding") -ne $null);"$e|$v|$p"'
+          $childProbeScript = '$e=[string]$PSVersionTable.PSEdition;$v=[string]$PSVersionTable.PSVersion;$p=([System.Diagnostics.ProcessStartInfo].GetProperty(''StandardInputEncoding'') -ne $null);"$e|$v|$p"'
+          $probe = & $pwshPath -NoLogo -NoProfile -NonInteractive -Command $childProbeScript
           if (($probe | Out-String).Trim() -ne 'Core|7.6.5|True') { throw "Installed broker re-probe failed: $probe" }
           Write-Host 'PWSH_BROKER_NATIVE_INSTALL=PASS'
           Write-Host "BOOTSTRAP_POWERSHELL=$($PSVersionTable.PSVersion)"
