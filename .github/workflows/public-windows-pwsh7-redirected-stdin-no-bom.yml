@@ -8,6 +8,12 @@ on:
       - diagnostics/read-stdin-raw.ps1
       - diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1
       - .github/workflows/public-windows-pwsh7-redirected-stdin-no-bom.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - diagnostics/read-stdin-raw.ps1
+      - diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1
+      - .github/workflows/public-windows-pwsh7-redirected-stdin-no-bom.yml
   workflow_dispatch:
 
 permissions:
@@ -21,16 +27,18 @@ jobs:
       matrix:
         os: [windows-2022, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.EXPECTED_SHA }}
       - name: Verify exact revision
         shell: pwsh
         run: |
           $actual = (git rev-parse HEAD).Trim()
-          if ($actual -ne '${{ github.sha }}') { throw "HEAD mismatch: $actual" }
+          if ($actual -ne $env:EXPECTED_SHA) { throw "HEAD mismatch: $actual" }
       - name: Verify PowerShell 7 redirected stdin exact bytes
         shell: pwsh
         run: |
