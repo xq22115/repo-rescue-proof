@@ -51,7 +51,7 @@ jobs:
           $observedHead = (git rev-parse HEAD).Trim()
           if ($observedHead -ne $env:EXPECTED_HEAD_SHA) { throw "Checkout head mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$observedHead" }
           $observedBlob = (git hash-object diagnostics/Get-Windows-ProcessModuleInventory.ps1).Trim()
-          if ($observedBlob -ne '765df91ecd81747ec827b435773b6827b0be13a1') { throw "Integrated module-inventory helper blob drifted: $observedBlob" }
+          if ($observedBlob -ne '9481e1b4d25ec3977614b554d252aa84275dca48') { throw "Integrated module-inventory helper blob drifted: $observedBlob" }
           Write-Host "DIAGNOSTIC_HEAD=$observedHead"
           Write-Host "MODULE_INVENTORY_HELPER_GIT_BLOB=$observedBlob"
 
