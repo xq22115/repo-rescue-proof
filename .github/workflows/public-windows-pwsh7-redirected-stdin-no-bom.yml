@@ -1,0 +1,43 @@
+name: Public Windows PowerShell 7 Redirected Stdin No-BOM Canary
+
+on:
+  push:
+    branches:
+      - diagnostic/mcp-stdio-ps7-nobom-20260824
+    paths:
+      - diagnostics/read-stdin-raw.ps1
+      - diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1
+      - .github/workflows/public-windows-pwsh7-redirected-stdin-no-bom.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: ${{ matrix.os }} / PowerShell 7
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact revision
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne '${{ github.sha }}') { throw "HEAD mismatch: $actual" }
+      - name: Verify PowerShell 7 redirected stdin exact bytes
+        shell: pwsh
+        run: |
+          ./diagnostics/test-pwsh7-redirected-stdin-no-bom.ps1 -ReceiptPath "artifacts/pwsh7-stdin-${{ matrix.os }}.json"
+      - name: Upload diagnostic receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwsh7-stdin-${{ matrix.os }}-${{ github.run_id }}
+          path: artifacts/pwsh7-stdin-${{ matrix.os }}.json
+          if-no-files-found: error
