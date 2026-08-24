@@ -9,8 +9,6 @@ on:
       - 'diagnostics/Get-Windows-ProcessModulesArchitectureEvidence.ps1'
       - 'diagnostics/test-processmodules-architecture-helper.ps1'
       - 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
-      - 'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1'
-      - 'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1'
       - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
   pull_request:
     paths:
@@ -18,8 +16,6 @@ on:
       - 'diagnostics/Get-Windows-ProcessModulesArchitectureEvidence.ps1'
       - 'diagnostics/test-processmodules-architecture-helper.ps1'
       - 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
-      - 'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1'
-      - 'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1'
       - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
   workflow_dispatch:
 
@@ -27,148 +23,90 @@ permissions:
   contents: read
 
 jobs:
-  windows-2022:
-    runs-on: windows-2022
+  processmodules-cross-bitness:
+    name: ${{ matrix.image }} / ${{ matrix.shell }}
+    runs-on: ${{ matrix.image }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: windows-2022
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-2022
+            shell: pwsh
+            expectedEdition: Core
+          - image: windows-latest
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-latest
+            shell: pwsh
+            expectedEdition: Core
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify integrated helper identities
-        shell: pwsh
-        run: |
-          $expected = @{
-            'diagnostics/Get-Windows-ProcessModuleInventory.ps1' = '9481e1b4d25ec3977614b554d252aa84275dca48'
-            'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1' = 'e15948dfa1e308c06250433ddf8c3d4718b3aa5b'
-            'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1' = '3909d8045147b6ef4826500c8c4b407a9149cfc7'
-          }
-          foreach ($path in $expected.Keys) {
-            $observed = (git hash-object $path).Trim()
-            if ($observed -ne $expected[$path]) { throw "Helper blob drifted. path=$path expected=$($expected[$path]) actual=$observed" }
-            Write-Host "HELPER_BLOB[$path]=$observed"
-          }
-      - name: Windows PowerShell 5.1 cross-bitness canary
-        shell: powershell
-        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-2022-ps51.json
-      - name: PowerShell 7 cross-bitness canary
-        shell: pwsh
-        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-2022-ps7.json
-      - name: Windows PowerShell 5.1 architecture helper contract
-        shell: powershell
-        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps51
-      - name: PowerShell 7 architecture helper contract
-        shell: pwsh
-        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps7
-      - name: Windows PowerShell 5.1 integrated inventory v2
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $p=Get-Process -Id $PID; $path=[string]$p.Path; if([string]::IsNullOrWhiteSpace($path)){$path=[string]$p.MainModule.FileName}
-          $path=[IO.Path]::GetFullPath($path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(); $r='.\artifacts\integrated-ps51.json'
-          $o=& .\diagnostics\Get-Windows-ProcessModuleInventory.ps1 -ProcessId $PID -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -OutputReceiptPath $r
-          if(-not $o.processModulesSameArchitecturePrerequisiteAccepted -or $o.processModulesEnumerationCompletenessProven){throw 'Integrated v2 architecture boundary failed.'}
-          $j=Get-Content -LiteralPath $r -Raw|ConvertFrom-Json; if([int]$j.schemaVersion-ne 2 -or -not [bool]$j.acceptanceBoundary.moduleInventorySnapshotAccepted -or [bool]$j.acceptanceBoundary.processModulesEnumerationCompletenessProven){throw 'Integrated v2 receipt boundary failed.'}
-          Write-Host "INTEGRATED_V2_PS51=PASS MODULES=$($j.moduleInventory.moduleCount) MACHINE=$($j.process.effectiveMachine)"
-      - name: PowerShell 7 integrated inventory v2
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $p=Get-Process -Id $PID; $path=[string]$p.Path; if([string]::IsNullOrWhiteSpace($path)){$path=[string]$p.MainModule.FileName}
-          $path=[IO.Path]::GetFullPath($path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(); $r='.\artifacts\integrated-ps7.json'
-          $o=& .\diagnostics\Get-Windows-ProcessModuleInventory.ps1 -ProcessId $PID -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -OutputReceiptPath $r
-          if(-not $o.processModulesSameArchitecturePrerequisiteAccepted -or $o.processModulesEnumerationCompletenessProven){throw 'Integrated v2 architecture boundary failed.'}
-          $j=Get-Content -LiteralPath $r -Raw|ConvertFrom-Json; if([int]$j.schemaVersion-ne 2 -or -not [bool]$j.acceptanceBoundary.moduleInventorySnapshotAccepted -or [bool]$j.acceptanceBoundary.processModulesEnumerationCompletenessProven){throw 'Integrated v2 receipt boundary failed.'}
-          Write-Host "INTEGRATED_V2_PS7=PASS MODULES=$($j.moduleInventory.moduleCount) MACHINE=$($j.process.effectiveMachine)"
-      - name: Windows PowerShell 5.1 spawn-bound lifetime inventory
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $path=(Get-Process -Id $PID).Path; if([string]::IsNullOrWhiteSpace($path)){$path=(Get-Process -Id $PID).MainModule.FileName}; $path=[IO.Path]::GetFullPath([string]$path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          $psi=New-Object Diagnostics.ProcessStartInfo; $psi.FileName=$path; $psi.Arguments='-NoLogo -NoProfile -Command "Start-Sleep -Seconds 60"'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true
-          $child=New-Object Diagnostics.Process; $child.StartInfo=$psi
-          try{$s=[datetimeoffset]::UtcNow; if(-not $child.Start()){throw 'child start failed'}; $e=[datetimeoffset]::UtcNow; $spawn='.\artifacts\spawn-bound-ps51-spawn.json'; $bound='.\artifacts\spawn-bound-ps51.json'; $sr=& .\diagnostics\Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1 -ProcessId $child.Id -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -SpawnWindowStartUtc $s.ToString('o') -SpawnWindowEndUtc $e.ToString('o') -ReceiptPath $spawn; $br=& .\diagnostics\Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1 -SpawnedProcessIdentityReceiptPath $spawn -SpawnedProcessIdentityReceiptSha256 $sr.receiptSha256 -ReceiptPath $bound; if(-not $br.moduleInventoryBoundToSpawnedProcessLifetime -or $br.processLifetimeRaceFree -or $br.processModulesEnumerationCompletenessProven){throw 'spawn-bound boundary failed'}; Write-Host "SPAWN_BOUND_PS51=PASS PID=$($child.Id) MODULES=$($br.moduleCount)"}finally{try{if(-not $child.HasExited){$child.Kill();[void]$child.WaitForExit(5000)}}catch{};$child.Dispose()}
-      - name: PowerShell 7 spawn-bound lifetime inventory
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $path=(Get-Process -Id $PID).Path; if([string]::IsNullOrWhiteSpace($path)){$path=(Get-Process -Id $PID).MainModule.FileName}; $path=[IO.Path]::GetFullPath([string]$path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          $psi=New-Object Diagnostics.ProcessStartInfo; $psi.FileName=$path; $psi.Arguments='-NoLogo -NoProfile -Command "Start-Sleep -Seconds 60"'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true
-          $child=New-Object Diagnostics.Process; $child.StartInfo=$psi
-          try{$s=[datetimeoffset]::UtcNow; if(-not $child.Start()){throw 'child start failed'}; $e=[datetimeoffset]::UtcNow; $spawn='.\artifacts\spawn-bound-ps7-spawn.json'; $bound='.\artifacts\spawn-bound-ps7.json'; $sr=& .\diagnostics\Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1 -ProcessId $child.Id -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -SpawnWindowStartUtc $s.ToString('o') -SpawnWindowEndUtc $e.ToString('o') -ReceiptPath $spawn; $br=& .\diagnostics\Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1 -SpawnedProcessIdentityReceiptPath $spawn -SpawnedProcessIdentityReceiptSha256 $sr.receiptSha256 -ReceiptPath $bound; if(-not $br.moduleInventoryBoundToSpawnedProcessLifetime -or $br.processLifetimeRaceFree -or $br.processModulesEnumerationCompletenessProven){throw 'spawn-bound boundary failed'}; Write-Host "SPAWN_BOUND_PS7=PASS PID=$($child.Id) MODULES=$($br.moduleCount)"}finally{try{if(-not $child.HasExited){$child.Kill();[void]$child.WaitForExit(5000)}}catch{};$child.Dispose()}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: processmodules-bitness-windows-2022
-          path: artifacts/**/*.json
 
-  windows-latest:
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify integrated helper identities
+      - name: Verify exact diagnostic revision and helper identity
         shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          $expected = @{
-            'diagnostics/Get-Windows-ProcessModuleInventory.ps1' = '9481e1b4d25ec3977614b554d252aa84275dca48'
-            'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1' = 'e15948dfa1e308c06250433ddf8c3d4718b3aa5b'
-            'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1' = '3909d8045147b6ef4826500c8c4b407a9149cfc7'
+          $ErrorActionPreference = 'Stop'
+          $observedHead = (git rev-parse HEAD).Trim()
+          if ($observedHead -ne $env:EXPECTED_HEAD_SHA) { throw "Checkout head mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$observedHead" }
+          $moduleBlob = (git hash-object diagnostics/Get-Windows-ProcessModuleInventory.ps1).Trim()
+          if ($moduleBlob -ne '9481e1b4d25ec3977614b554d252aa84275dca48') { throw "Process module inventory helper drifted. actual=$moduleBlob" }
+          Write-Host "DIAGNOSTIC_HEAD=$observedHead"
+          Write-Host "PROCESS_MODULE_INVENTORY_GIT_BLOB=$moduleBlob"
+
+      - name: Cross-bitness canary
+        shell: ${{ matrix.shell }}
+        env:
+          EXPECTED_EDITION: ${{ matrix.expectedEdition }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]$PSVersionTable.PSEdition -ne $env:EXPECTED_EDITION) {
+            throw "Unexpected PowerShell edition. expected=$env:EXPECTED_EDITION actual=$($PSVersionTable.PSEdition)"
           }
-          foreach ($path in $expected.Keys) {
-            $observed = (git hash-object $path).Trim()
-            if ($observed -ne $expected[$path]) { throw "Helper blob drifted. path=$path expected=$($expected[$path]) actual=$observed" }
-            Write-Host "HELPER_BLOB[$path]=$observed"
-          }
-      - name: Windows PowerShell 5.1 cross-bitness canary
-        shell: powershell
-        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-latest-ps51.json
-      - name: PowerShell 7 cross-bitness canary
-        shell: pwsh
-        run: .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath .\artifacts\windows-latest-ps7.json
-      - name: Windows PowerShell 5.1 architecture helper contract
-        shell: powershell
-        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps51
-      - name: PowerShell 7 architecture helper contract
-        shell: pwsh
-        run: .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory .\artifacts\helper-ps7
-      - name: Windows PowerShell 5.1 integrated inventory v2
-        shell: powershell
+          .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP ('cross-bitness-' + [guid]::NewGuid().ToString('N') + '.json'))
+
+      - name: Architecture helper contract
+        shell: ${{ matrix.shell }}
         run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $p=Get-Process -Id $PID; $path=[string]$p.Path; if([string]::IsNullOrWhiteSpace($path)){$path=[string]$p.MainModule.FileName}
-          $path=[IO.Path]::GetFullPath($path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(); $r='.\artifacts\integrated-ps51.json'
-          $o=& .\diagnostics\Get-Windows-ProcessModuleInventory.ps1 -ProcessId $PID -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -OutputReceiptPath $r
-          if(-not $o.processModulesSameArchitecturePrerequisiteAccepted -or $o.processModulesEnumerationCompletenessProven){throw 'Integrated v2 architecture boundary failed.'}
-          $j=Get-Content -LiteralPath $r -Raw|ConvertFrom-Json; if([int]$j.schemaVersion-ne 2 -or -not [bool]$j.acceptanceBoundary.moduleInventorySnapshotAccepted -or [bool]$j.acceptanceBoundary.processModulesEnumerationCompletenessProven){throw 'Integrated v2 receipt boundary failed.'}
-          Write-Host "INTEGRATED_V2_PS51=PASS MODULES=$($j.moduleInventory.moduleCount) MACHINE=$($j.process.effectiveMachine)"
-      - name: PowerShell 7 integrated inventory v2
-        shell: pwsh
+          $ErrorActionPreference = 'Stop'
+          .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP ('architecture-' + [guid]::NewGuid().ToString('N')))
+
+      - name: Integrated inventory v2
+        shell: ${{ matrix.shell }}
         run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $p=Get-Process -Id $PID; $path=[string]$p.Path; if([string]::IsNullOrWhiteSpace($path)){$path=[string]$p.MainModule.FileName}
-          $path=[IO.Path]::GetFullPath($path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(); $r='.\artifacts\integrated-ps7.json'
-          $o=& .\diagnostics\Get-Windows-ProcessModuleInventory.ps1 -ProcessId $PID -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -OutputReceiptPath $r
-          if(-not $o.processModulesSameArchitecturePrerequisiteAccepted -or $o.processModulesEnumerationCompletenessProven){throw 'Integrated v2 architecture boundary failed.'}
-          $j=Get-Content -LiteralPath $r -Raw|ConvertFrom-Json; if([int]$j.schemaVersion-ne 2 -or -not [bool]$j.acceptanceBoundary.moduleInventorySnapshotAccepted -or [bool]$j.acceptanceBoundary.processModulesEnumerationCompletenessProven){throw 'Integrated v2 receipt boundary failed.'}
-          Write-Host "INTEGRATED_V2_PS7=PASS MODULES=$($j.moduleInventory.moduleCount) MACHINE=$($j.process.effectiveMachine)"
-      - name: Windows PowerShell 5.1 spawn-bound lifetime inventory
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $path=(Get-Process -Id $PID).Path; if([string]::IsNullOrWhiteSpace($path)){$path=(Get-Process -Id $PID).MainModule.FileName}; $path=[IO.Path]::GetFullPath([string]$path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          $psi=New-Object Diagnostics.ProcessStartInfo; $psi.FileName=$path; $psi.Arguments='-NoLogo -NoProfile -Command "Start-Sleep -Seconds 60"'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true
-          $child=New-Object Diagnostics.Process; $child.StartInfo=$psi
-          try{$s=[datetimeoffset]::UtcNow; if(-not $child.Start()){throw 'child start failed'}; $e=[datetimeoffset]::UtcNow; $spawn='.\artifacts\spawn-bound-ps51-spawn.json'; $bound='.\artifacts\spawn-bound-ps51.json'; $sr=& .\diagnostics\Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1 -ProcessId $child.Id -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -SpawnWindowStartUtc $s.ToString('o') -SpawnWindowEndUtc $e.ToString('o') -ReceiptPath $spawn; $br=& .\diagnostics\Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1 -SpawnedProcessIdentityReceiptPath $spawn -SpawnedProcessIdentityReceiptSha256 $sr.receiptSha256 -ReceiptPath $bound; if(-not $br.moduleInventoryBoundToSpawnedProcessLifetime -or $br.processLifetimeRaceFree -or $br.processModulesEnumerationCompletenessProven){throw 'spawn-bound boundary failed'}; Write-Host "SPAWN_BOUND_PS51=PASS PID=$($child.Id) MODULES=$($br.moduleCount)"}finally{try{if(-not $child.HasExited){$child.Kill();[void]$child.WaitForExit(5000)}}catch{};$child.Dispose()}
-      - name: PowerShell 7 spawn-bound lifetime inventory
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $current = Get-Process -Id $PID
+          $path = $null
+          try { $path = [string]$current.Path } catch { }
+          if ([string]::IsNullOrWhiteSpace($path)) { $path = [string]$current.MainModule.FileName }
+          $path = [IO.Path]::GetFullPath($path)
+          $sha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          $receiptPath = Join-Path $env:RUNNER_TEMP ('integrated-v2-' + [guid]::NewGuid().ToString('N') + '.json')
+          $result = & .\diagnostics\Get-Windows-ProcessModuleInventory.ps1 -ProcessId $PID -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -OutputReceiptPath $receiptPath
+          if (-not [bool]$result.processModulesSameArchitecturePrerequisiteAccepted) { throw 'Same-architecture prerequisite was not accepted.' }
+          if ([bool]$result.processModulesEnumerationCompletenessProven) { throw 'Process.Modules completeness must remain unproven.' }
+          $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ([int]$receipt.schemaVersion -ne 2) { throw 'Unexpected integrated inventory schema.' }
+          if (-not [bool]$receipt.acceptanceBoundary.moduleInventorySnapshotAccepted) { throw 'Integrated module inventory was not accepted.' }
+          if ([bool]$receipt.acceptanceBoundary.processModulesEnumerationCompletenessProven) { throw 'Receipt overclaimed Process.Modules completeness.' }
+          Write-Host "INTEGRATED_V2=PASS MODULES=$($receipt.moduleInventory.moduleCount) MACHINE=$($receipt.process.effectiveMachine)"
+
+      - name: State acceptance boundary
         shell: pwsh
         run: |
-          $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-          $path=(Get-Process -Id $PID).Path; if([string]::IsNullOrWhiteSpace($path)){$path=(Get-Process -Id $PID).MainModule.FileName}; $path=[IO.Path]::GetFullPath([string]$path); $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          $psi=New-Object Diagnostics.ProcessStartInfo; $psi.FileName=$path; $psi.Arguments='-NoLogo -NoProfile -Command "Start-Sleep -Seconds 60"'; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true
-          $child=New-Object Diagnostics.Process; $child.StartInfo=$psi
-          try{$s=[datetimeoffset]::UtcNow; if(-not $child.Start()){throw 'child start failed'}; $e=[datetimeoffset]::UtcNow; $spawn='.\artifacts\spawn-bound-ps7-spawn.json'; $bound='.\artifacts\spawn-bound-ps7.json'; $sr=& .\diagnostics\Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1 -ProcessId $child.Id -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -SpawnWindowStartUtc $s.ToString('o') -SpawnWindowEndUtc $e.ToString('o') -ReceiptPath $spawn; $br=& .\diagnostics\Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1 -SpawnedProcessIdentityReceiptPath $spawn -SpawnedProcessIdentityReceiptSha256 $sr.receiptSha256 -ReceiptPath $bound; if(-not $br.moduleInventoryBoundToSpawnedProcessLifetime -or $br.processLifetimeRaceFree -or $br.processModulesEnumerationCompletenessProven){throw 'spawn-bound boundary failed'}; Write-Host "SPAWN_BOUND_PS7=PASS PID=$($child.Id) MODULES=$($br.moduleCount)"}finally{try{if(-not $child.HasExited){$child.Kill();[void]$child.WaitForExit(5000)}}catch{};$child.Dispose()}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: processmodules-bitness-windows-latest
-          path: artifacts/**/*.json
+          @'
+          ## Process.Modules cross-bitness diagnostic
+
+          - This workflow owns only the cross-bitness / architecture-prerequisite / integrated schema-v2 inventory checks.
+          - Spawned-process lifetime binding is owned by the separate `Validate Spawn-Bound Process Module Inventory` workflow so helper identity changes do not create duplicated stale pins here.
+          - Same architecture is necessary but does not prove Process.Modules enumeration completeness, dependent-module trust, late-load coverage, mapped-image identity, MCP protocol health, tool semantics, or final Windows state.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
