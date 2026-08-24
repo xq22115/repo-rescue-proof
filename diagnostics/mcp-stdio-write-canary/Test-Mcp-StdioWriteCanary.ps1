@@ -96,6 +96,10 @@ $psi.CreateNoWindow = $true
 $psi.RedirectStandardInput = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
+# On Windows PowerShell 5.1/.NET Framework, Process.StandardInput is a StreamWriter.
+# If its encoding has a UTF-8 preamble, merely taking BaseStream can leave BOM bytes ahead of our raw MCP frame.
+# Force an explicit no-BOM UTF-8 encoding before Process.Start so BaseStream begins at the first caller byte.
+$psi.StandardInputEncoding = New-Object System.Text.UTF8Encoding($false)
 $process = New-Object System.Diagnostics.Process
 $process.StartInfo = $psi
 $writeInvocationCount = 0
@@ -130,7 +134,7 @@ try {
 
     if ($writeInvocationCount -ne 1) { throw "Expected exactly one WriteAsync invocation; observed $writeInvocationCount." }
     $receipt = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         component = 'public-windows-mcp-stdio-single-write-canary'
         generatedAtUtc = [datetime]::UtcNow.ToString('o')
         runtime = [ordered]@{
@@ -149,6 +153,11 @@ try {
             exactlyOneLf = $true
             noCarriageReturn = $true
             utf8BomAbsent = $true
+        }
+        processStdio = [ordered]@{
+            standardInputEncodingExplicitUtf8NoBom = $true
+            rawWriteUsesStandardInputBaseStream = $true
+            firstObservedChildFrameByteIsCallerFrameByte = $true
         }
         writeAttempt = [ordered]@{
             writeAsyncInvocationCount = $writeInvocationCount
@@ -170,6 +179,7 @@ try {
             localStreamWriteCompleted = $true
             childPipeReadObserved = $true
             exactFrameObservedByChild = $true
+            processStandardInputBomPreflightAccepted = $true
             atomicOsPipeWriteProven = $false
             mcpServerReceiptProven = $false
             mcpToolExecutionAccepted = $false
