@@ -16,3 +16,54 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest -v test_repo_rescue_proof.py
+
+  approval-reservation:
+    name: approval reservation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact diagnostic head
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $observed = (git rev-parse HEAD).Trim()
+          if ($observed -ne $env:EXPECTED_HEAD_SHA) { throw "diagnostic head mismatch expected=$env:EXPECTED_HEAD_SHA observed=$observed" }
+          "DIAGNOSTIC_HEAD=$observed"
+
+      - name: Run reservation canary in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\diagnostics\Test-McpApprovalReservationAtomicity.ps1 -EvidencePath "$env:RUNNER_TEMP\reservation-ps51.json"
+
+      - name: Run reservation canary in PowerShell 7
+        shell: pwsh
+        run: |
+          .\diagnostics\Test-McpApprovalReservationAtomicity.ps1 -EvidencePath "$env:RUNNER_TEMP\reservation-ps7.json"
+
+      - name: Stage sanitized evidence
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'reservation-evidence'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP\reservation-ps51.json" -Destination (Join-Path $out 'reservation-ps51.json')
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP\reservation-ps7.json" -Destination (Join-Path $out 'reservation-ps7.json')
+          Get-ChildItem -LiteralPath $out | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLowerInvariant()) *$($_.Path | Split-Path -Leaf)" } | Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS') -Encoding ascii
+
+      - name: Upload reservation evidence
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: approval-reservation-${{ matrix.os }}
+          path: ${{ runner.temp }}\reservation-evidence
+          if-no-files-found: error
+          retention-days: 7
