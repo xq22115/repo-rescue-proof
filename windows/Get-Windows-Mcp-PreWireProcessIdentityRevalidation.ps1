@@ -18,13 +18,14 @@ function Assert-Sha256([string]$Value, [string]$FieldPath) {
     return $Value.ToLowerInvariant()
 }
 
-function Get-PropertyValue($Object,[string]$Name){
+function Get-PropertyValue($Object, [string]$Name) {
     Assert-True ($null -ne $Object) "Object for property '$Name' is null."
-    $p=$Object.PSObject.Properties[$Name]
-    Assert-True ($null -ne $p) "Missing required property '$Name'."
-    return $p.Value
+    $property = $Object.PSObject.Properties[$Name]
+    Assert-True ($null -ne $property) "Missing required property '$Name'."
+    return $property.Value
 }
-function ConvertTo-UtcTimestamp([object]$Value,[string]$FieldPath){
+
+function ConvertTo-UtcTimestamp([object]$Value, [string]$FieldPath) {
     Assert-True ($null -ne $Value) "$FieldPath is required."
     if($Value -is [datetimeoffset]){ return ([datetimeoffset]$Value).ToUniversalTime() }
     if($Value -is [datetime]){
