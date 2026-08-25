@@ -1,0 +1,50 @@
+name: Diagnostic UTF-8 No-BOM Receipt Writer
+
+on:
+  pull_request:
+    paths:
+      - 'diagnostics/receipt-utf8-nobom-canary.ps1'
+      - '.github/workflows/receipt-utf8-nobom-canary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-encoding:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Read back exact diagnostic head
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_HEAD_SHA) {
+            throw "Diagnostic checkout mismatch: expected $env:EXPECTED_HEAD_SHA, got $actual"
+          }
+
+      - name: Compare receipt writers in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./diagnostics/receipt-utf8-nobom-canary.ps1 -OutputDirectory './evidence/windows-powershell-5.1'
+
+      - name: Compare receipt writers in PowerShell 7
+        shell: pwsh
+        run: |
+          ./diagnostics/receipt-utf8-nobom-canary.ps1 -OutputDirectory './evidence/powershell-7'
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipt-utf8-nobom-${{ matrix.os }}
+          path: evidence/**
+          if-no-files-found: error
