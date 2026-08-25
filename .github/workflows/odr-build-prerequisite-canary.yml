@@ -1,0 +1,97 @@
+name: ODR Build Prerequisite Canary
+
+on:
+  push:
+    branches:
+      - diagnostic/odr-build-prerequisite-20260825
+  pull_request:
+    paths:
+      - .github/workflows/odr-build-prerequisite-canary.yml
+
+permissions:
+  contents: read
+
+jobs:
+  odr-build-prerequisite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Observe ODR prerequisite in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $minimumBuild = 26220
+          $minimumUbr = 7262
+          $cv = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          $build = [int]$cv.CurrentBuildNumber
+          $ubr = [int]$cv.UBR
+          $eligible = if ($build -gt $minimumBuild) { $true } elseif ($build -lt $minimumBuild) { $false } else { $ubr -ge $minimumUbr }
+          $odr = Get-Command odr.exe -ErrorAction SilentlyContinue
+          $receipt = [ordered]@{
+            schemaVersion = 1
+            component = 'public-windows-odr-build-prerequisite-observation'
+            workflowSha = '${{ github.sha }}'
+            runnerLabel = '${{ matrix.os }}'
+            shell = 'WindowsPowerShell'
+            powershellVersion = [string]$PSVersionTable.PSVersion
+            windowsBuild = $build
+            windowsUbr = $ubr
+            documentedMinimumBuild = "$minimumBuild.$minimumUbr"
+            odrBuildEligible = [bool]$eligible
+            odrExecutablePresent = ($null -ne $odr)
+            odrExecutablePath = if ($null -ne $odr) { [string]$odr.Source } else { $null }
+            odrCommandInvoked = $false
+            productionOdrRuntimeAccepted = $false
+            diagnosticOnly = $true
+          }
+          New-Item -ItemType Directory -Path evidence -Force | Out-Null
+          $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "evidence/odr-build-${{ matrix.os }}-ps51.json" -Encoding UTF8
+          $receipt | ConvertTo-Json -Depth 5
+          if ($eligible) {
+            throw "The hosted runner now meets or exceeds the documented ODR minimum; this diagnostic must be reevaluated instead of silently retaining the blocked assumption."
+          }
+
+      - name: Observe ODR prerequisite in PowerShell 7
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $minimumBuild = 26220
+          $minimumUbr = 7262
+          $cv = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          $build = [int]$cv.CurrentBuildNumber
+          $ubr = [int]$cv.UBR
+          $eligible = if ($build -gt $minimumBuild) { $true } elseif ($build -lt $minimumBuild) { $false } else { $ubr -ge $minimumUbr }
+          $odr = Get-Command odr.exe -ErrorAction SilentlyContinue
+          $receipt = [ordered]@{
+            schemaVersion = 1
+            component = 'public-windows-odr-build-prerequisite-observation'
+            workflowSha = '${{ github.sha }}'
+            runnerLabel = '${{ matrix.os }}'
+            shell = 'PowerShellCore'
+            powershellVersion = [string]$PSVersionTable.PSVersion
+            windowsBuild = $build
+            windowsUbr = $ubr
+            documentedMinimumBuild = "$minimumBuild.$minimumUbr"
+            odrBuildEligible = [bool]$eligible
+            odrExecutablePresent = ($null -ne $odr)
+            odrExecutablePath = if ($null -ne $odr) { [string]$odr.Source } else { $null }
+            odrCommandInvoked = $false
+            productionOdrRuntimeAccepted = $false
+            diagnosticOnly = $true
+          }
+          New-Item -ItemType Directory -Path evidence -Force | Out-Null
+          $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "evidence/odr-build-${{ matrix.os }}-ps7.json" -Encoding UTF8
+          $receipt | ConvertTo-Json -Depth 5
+          if ($eligible) {
+            throw "The hosted runner now meets or exceeds the documented ODR minimum; this diagnostic must be reevaluated instead of silently retaining the blocked assumption."
+          }
+
+      - name: Upload ODR prerequisite evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: odr-build-prerequisite-${{ matrix.os }}
+          path: evidence/*.json
+          if-no-files-found: error
