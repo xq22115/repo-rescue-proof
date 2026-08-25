@@ -79,12 +79,14 @@ if ($SkipPlatformCheck) {
     Assert-True ($null -ne $OverrideDotnetPresent) 'Test mode requires -OverrideDotnetPresent.'
     Assert-True ($null -ne $OverrideMcpbCliPresent) 'Test mode requires -OverrideMcpbCliPresent.'
 
+    # Windows PowerShell 5.1 boxes Nullable[T] parameters as their underlying scalar type.
+    # Cast the already-null-checked values directly instead of dereferencing .Value.
     $buildNumber = [int]$OverrideBuildNumber
-    $ubr = [int]$OverrideUbr.Value
-    $odrPresent = [bool]$OverrideOdrPresent.Value
-    $developerModeEnabled = [bool]$OverrideDeveloperModeEnabled.Value
-    $dotnetPresent = [bool]$OverrideDotnetPresent.Value
-    $mcpbCliPresent = [bool]$OverrideMcpbCliPresent.Value
+    $ubr = [int]$OverrideUbr
+    $odrPresent = [bool]$OverrideOdrPresent
+    $developerModeEnabled = [bool]$OverrideDeveloperModeEnabled
+    $dotnetPresent = [bool]$OverrideDotnetPresent
+    $mcpbCliPresent = [bool]$OverrideMcpbCliPresent
     $productName = 'synthetic-windows'
     $displayVersion = 'synthetic'
     $editionId = 'synthetic'
