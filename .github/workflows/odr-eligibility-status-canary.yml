@@ -1,0 +1,90 @@
+name: ODR Eligibility Status Canary
+
+on:
+  push:
+    branches:
+      - diagnostic/odr-eligibility-status-20260825
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  odr-eligibility-status:
+    name: ${{ matrix.os }} deployment-profile status
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Read back exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_HEAD_SHA) {
+            throw "ODR eligibility canary checkout mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$actual"
+          }
+          Write-Host "EXACT_HEAD=$actual"
+
+      - name: Verify deployment profile with Windows PowerShell 5.1
+        shell: powershell
+        run: .\windows\Test-Windows-Mcp-DeploymentProfile.ps1
+
+      - name: Verify deployment profile with PowerShell 7
+        shell: pwsh
+        run: .\windows\Test-Windows-Mcp-DeploymentProfile.ps1
+
+      - name: Observe real hosted-Windows ODR prerequisite status
+        shell: pwsh
+        run: |
+          $receipt = Join-Path $env:RUNNER_TEMP 'odr-hosted-observation.json'
+          .\windows\Resolve-Windows-Mcp-DeploymentProfile.ps1 -ReceiptPath $receipt -RequestedProfile auto | Out-Null
+          $doc = Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+
+          if ($doc.schemaVersion -ne 2) { throw "Expected deployment-profile schema 2, observed $($doc.schemaVersion)." }
+          if ($doc.selectedProfile -ne 'direct-stdio-verified') { throw "Observation-only hosted canary must not silently select preview ODR." }
+          if ($doc.previewOdrExplicitlyAllowed -ne $false) { throw "Hosted canary unexpectedly allowed preview ODR." }
+          if ($doc.acceptanceBoundary.productionOdrPrerequisiteObservationAccepted -ne $true) { throw "Production prerequisite observation was not accepted." }
+          if ($doc.acceptanceBoundary.odrRuntimeAccepted -ne $false) { throw "ODR runtime was incorrectly promoted by a read-only prerequisite observation." }
+
+          $summary = [ordered]@{
+            schemaVersion = $doc.schemaVersion
+            build = "$($doc.windows.buildNumber).$($doc.windows.ubr)"
+            minimum = $doc.odr.documentedMinimumBuild
+            buildEligible = [bool]$doc.odr.buildEligible
+            executablePresent = [bool]$doc.odr.executablePresent
+            prerequisiteEligible = [bool]$doc.odr.prerequisiteEligible
+            prerequisiteStatus = [string]$doc.odr.prerequisiteStatus
+            selectedProfile = [string]$doc.selectedProfile
+            odrRuntimeAccepted = [bool]$doc.acceptanceBoundary.odrRuntimeAccepted
+          }
+          $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'odr-hosted-summary.json') -Encoding UTF8
+          $summary | ConvertTo-Json -Depth 4
+
+      - name: Upload sanitized observation
+        uses: actions/upload-artifact@v4
+        with:
+          name: odr-eligibility-${{ matrix.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/odr-hosted-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: State acceptance boundary
+        shell: pwsh
+        run: |
+          @"
+          ## ODR eligibility observation boundary
+
+          This canary validates machine-readable ODR prerequisite classification and records the current hosted Windows build plus odr.exe presence.
+          It does not invoke odr.exe, does not enable preview ODR, and does not accept ODR runtime, MCP protocol, tool semantics, or final Windows state.
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
