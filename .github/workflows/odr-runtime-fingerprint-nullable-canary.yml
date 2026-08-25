@@ -1,0 +1,50 @@
+name: Diagnostic ODR Runtime Fingerprint Nullable Binding
+
+on:
+  pull_request:
+    paths:
+      - 'diagnostics/odr-runtime-fingerprint-nullable-canary.ps1'
+      - '.github/workflows/odr-runtime-fingerprint-nullable-canary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  nullable-binding:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Read back exact diagnostic head
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_HEAD_SHA) {
+            throw "Diagnostic checkout mismatch: expected $env:EXPECTED_HEAD_SHA, got $actual"
+          }
+
+      - name: Observe Nullable binding in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./diagnostics/odr-runtime-fingerprint-nullable-canary.ps1 -OutputPath './evidence/windows-powershell-5.1.json'
+
+      - name: Observe Nullable binding in PowerShell 7
+        shell: pwsh
+        run: |
+          ./diagnostics/odr-runtime-fingerprint-nullable-canary.ps1 -OutputPath './evidence/powershell-7.json'
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: odr-runtime-fingerprint-nullable-${{ matrix.os }}
+          path: evidence/*.json
+          if-no-files-found: error
