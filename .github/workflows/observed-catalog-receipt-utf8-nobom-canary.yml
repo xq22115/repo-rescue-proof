@@ -1,0 +1,91 @@
+name: Observed Catalog Receipt UTF-8 No-BOM Canary
+
+on:
+  push:
+    branches:
+      - diagnostic/observed-catalog-receipt-utf8-nobom-20260825
+    paths:
+      - 'windows/**'
+      - '.github/workflows/observed-catalog-receipt-utf8-nobom-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observed-catalog-receipt:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Read back revision and exact mirrored Git blobs
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          if ($actualHead -ne $env:EXPECTED_HEAD_SHA) {
+            throw "Diagnostic checkout mismatch: expected $env:EXPECTED_HEAD_SHA, got $actualHead"
+          }
+          $expected = @{
+            'windows/Compare-Windows-Mcp-ObservedToolCatalog.ps1' = '3d6baa937110464cd6fc2b92e190d780d8f6366a'
+            'windows/Test-Windows-Mcp-ObservedToolCatalogReceiptEncoding.ps1' = '599f89a8fa0db8afb42e99682ed229b68c2f3f2c'
+            'windows/ConvertTo-BraintrustCanonicalJson.ps1' = '0ed3d31e1bc13c20b5e4924b182ff77215f05893'
+            'windows/Get-BraintrustStrictJsonScalar.ps1' = '4bc29ae306b613aafcc37c4bc63e54e321a38eb2'
+          }
+          foreach ($entry in $expected.GetEnumerator()) {
+            $actual = (git hash-object -- $entry.Key).Trim()
+            if ($actual -ne $entry.Value) {
+              throw "Exact mirror mismatch for $($entry.Key): expected $($entry.Value), got $actual"
+            }
+          }
+
+      - name: Verify observed-catalog receipt bytes with Windows PowerShell 5.1
+        shell: powershell
+        run: .\windows\Test-Windows-Mcp-ObservedToolCatalogReceiptEncoding.ps1
+
+      - name: Verify observed-catalog receipt bytes with PowerShell 7
+        shell: pwsh
+        run: .\windows\Test-Windows-Mcp-ObservedToolCatalogReceiptEncoding.ps1
+
+      - name: Persist native diagnostic summary
+        shell: pwsh
+        env:
+          MATRIX_OS: ${{ matrix.os }}
+        run: |
+          New-Item -ItemType Directory -Path evidence -Force | Out-Null
+          $currentVersion = $PSVersionTable.PSVersion.ToString()
+          $osVersion = [Environment]::OSVersion.Version.ToString()
+          $summary = [ordered]@{
+            component = 'observed-catalog-receipt-utf8-nobom-native-canary'
+            runnerImage = $env:MATRIX_OS
+            windowsVersion = $osVersion
+            powershell7Version = $currentVersion
+            exactMirrorBlobsAccepted = $true
+            windowsPowerShell51ContractAccepted = $true
+            powershell7ContractAccepted = $true
+            utf8BomRejected = $true
+            implicitTrailingCrLfRejected = $true
+            productionBraintrustRuntimeAccepted = $false
+            mcpProtocolRuntimeAccepted = $false
+            semanticToolAccepted = $false
+            windowsFinalStateAccepted = $false
+          }
+          $json = $summary | ConvertTo-Json -Depth 6
+          [IO.File]::WriteAllText((Join-Path (Get-Location) 'evidence/native-summary.json'), $json, (New-Object Text.UTF8Encoding($false)))
+
+      - name: Upload native diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: observed-catalog-receipt-utf8-nobom-${{ matrix.os }}
+          path: evidence/native-summary.json
+          if-no-files-found: error
