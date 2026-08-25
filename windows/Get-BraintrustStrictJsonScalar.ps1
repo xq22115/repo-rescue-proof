@@ -185,6 +185,11 @@ function Get-BraintrustRequiredJsonTimestampString {
         throw "Missing required JSON timestamp string '$FieldPath'."
     }
 
+    # JSON has no native date/time scalar. Windows PowerShell / PowerShell ConvertFrom-Json may
+    # eagerly materialize ISO-8601 JSON strings as DateTime. Accept DateTime/DateTimeOffset only
+    # for timestamp fields, normalize them to round-trip UTC text, and continue to reject every
+    # numeric/boolean/object/array type. This preserves the original JSON-string type contract
+    # without weakening the generic strict-string reader used for identities and hashes.
     if ($property.Value -is [string]) {
         $value = [string]$property.Value
         if ([string]::IsNullOrWhiteSpace($value)) {
