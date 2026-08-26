@@ -242,7 +242,9 @@ $leaseStream = $null
 try {
     $leaseStream = [System.IO.File]::Open($leasePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
     $leaseStream.Write($leaseBytes, 0, $leaseBytes.Length)
-    $leaseStream.Flush()
+    # Request an OS/intermediate-buffer flush before the lease becomes effectuation authority.
+    # This narrows abrupt-termination loss risk but is not a power-loss or exactly-once proof.
+    $leaseStream.Flush($true)
 } catch [System.IO.IOException] {
     throw "MCP_STDIO_SINGLE_FLIGHT_BUSY_OR_STALE: a lease already exists for process/session $sessionKeySha256; do not retry automatically because delivery state may be unknown."
 } finally {
