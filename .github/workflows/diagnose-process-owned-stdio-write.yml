@@ -16,28 +16,12 @@ permissions:
   contents: read
 
 jobs:
-  native-process-owned-write:
-    name: ${{ matrix.os }} / ${{ matrix.label }}
+  ps51:
+    name: ${{ matrix.os }} / Windows PowerShell 5.1
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-2022
-            shell: powershell
-            label: Windows PowerShell 5.1
-            artifact: windows-2022-ps51
-          - os: windows-2022
-            shell: pwsh
-            label: PowerShell 7
-            artifact: windows-2022-ps7
-          - os: windows-latest
-            shell: powershell
-            label: Windows PowerShell 5.1
-            artifact: windows-latest-ps51
-          - os: windows-latest
-            shell: pwsh
-            label: PowerShell 7
-            artifact: windows-latest-ps7
+        os: [windows-2022, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 6
     steps:
@@ -53,28 +37,68 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          wrapper_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)"
-          strict_blob="$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)"
-          canonical_blob="$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)"
-          near_wire_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)"
-          low_level_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)"
-          printf 'wrapper_blob=%s\nstrict_json_blob=%s\ncanonical_json_blob=%s\nnear_wire_blob=%s\nlow_level_blob=%s\n' "$wrapper_blob" "$strict_blob" "$canonical_blob" "$near_wire_blob" "$low_level_blob"
-          test "$wrapper_blob" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
-          test "$strict_blob" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
-          test "$canonical_blob" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
-          test "$near_wire_blob" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
-          test "$low_level_blob" = "2909c16aed847c22693bfe094de3ff076003013b"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
+          test "$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+          test "$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
       - name: Exercise exact private sender chain
-        shell: ${{ matrix.shell }}
+        shell: powershell
         timeout-minutes: 3
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\result.json'
-          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel '${{ matrix.label }}' -OutputPath $out
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: process-owned-stdio-write-${{ matrix.artifact }}
+          name: process-owned-stdio-write-${{ matrix.os }}-ps51
+          path: ${{ runner.temp }}/process-owned-stdio-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'PS5.1 sender-chain exercise is isolated and time-bounded; failure does not suppress PS7 evidence.' >> "$GITHUB_STEP_SUMMARY"
+
+  ps7:
+    name: ${{ matrix.os }} / PowerShell 7
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision and private Git blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
+          test "$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+          test "$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
+      - name: Exercise exact private sender chain
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\result.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-owned-stdio-write-${{ matrix.os }}-ps7
           path: ${{ runner.temp }}/process-owned-stdio-evidence/*.json
           if-no-files-found: warn
           retention-days: 7
@@ -83,9 +107,7 @@ jobs:
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ## Diagnostic-only boundary
           Exercises exact private bytes for the process-owned wrapper, strict JSON helper, canonical JSON helper, near-wire sender, and lower-level stdio sender using structurally-valid synthetic upstream receipts.
-          PS5.1 and PS7 are isolated into independent jobs so one edition cannot hide the other edition's outcome. Each exercise is time-bounded; a hang is a diagnostic failure rather than an indefinite pending state.
           The diagnostic child reads the exact planned frame and a same-executable sibling process must be rejected before the sender chain.
           This does not prove a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, physical server identity, authorization, semantic tool success, or final Windows state.
           EOF
