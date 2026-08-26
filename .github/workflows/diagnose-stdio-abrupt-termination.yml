@@ -1,0 +1,96 @@
+name: Diagnose Windows Stdio Abrupt Termination Recovery
+
+on:
+  push:
+    branches:
+      - 'diagnostic/process-owned-stdio-write-20260826'
+    paths:
+      - '.github/workflows/diagnose-stdio-abrupt-termination.yml'
+      - 'diagnostics/process-owned/Invoke-StdioSingleFlightAbruptTerminationCanary.ps1'
+      - 'diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1'
+      - 'diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1'
+      - 'diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-2022:
+    name: windows-2022 / abrupt termination recovery
+    runs-on: windows-2022
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision and private Git blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+      - name: Exercise abrupt worker termination and retained-lease recovery
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'stdio-abrupt-termination-evidence\result.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightAbruptTerminationCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdio-abrupt-termination-windows-2022
+          path: ${{ runner.temp }}/stdio-abrupt-termination-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'This canary only tests external worker termination after the exact private single-flight wrapper creates its lease, retained lease byte identity, and exact private recovery classification. It does not prove OS crash or power-loss durability, automatic recovery safety, exactly-once effects, delivery outcome, authorization, or semantic Windows state.' >> "$GITHUB_STEP_SUMMARY"
+
+  windows-latest:
+    name: windows-latest / abrupt termination recovery
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision and private Git blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+      - name: Exercise abrupt worker termination and retained-lease recovery
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'stdio-abrupt-termination-evidence\result.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightAbruptTerminationCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdio-abrupt-termination-windows-latest
+          path: ${{ runner.temp }}/stdio-abrupt-termination-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'This canary only tests external worker termination after the exact private single-flight wrapper creates its lease, retained lease byte identity, and exact private recovery classification. It does not prove OS crash or power-loss durability, automatic recovery safety, exactly-once effects, delivery outcome, authorization, or semantic Windows state.' >> "$GITHUB_STEP_SUMMARY"
