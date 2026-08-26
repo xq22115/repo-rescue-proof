@@ -39,16 +39,21 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
           wrapper_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)"
           strict_blob="$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)"
-          echo "wrapper_blob=$wrapper_blob"
-          echo "strict_json_blob=$strict_blob"
+          canonical_blob="$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)"
+          near_wire_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)"
+          low_level_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)"
+          printf 'wrapper_blob=%s\nstrict_json_blob=%s\ncanonical_json_blob=%s\nnear_wire_blob=%s\nlow_level_blob=%s\n' "$wrapper_blob" "$strict_blob" "$canonical_blob" "$near_wire_blob" "$low_level_blob"
           test "$wrapper_blob" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
           test "$strict_blob" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
-      - name: Exercise exact production wrapper with Windows PowerShell 5.1
+          test "$canonical_blob" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
+          test "$near_wire_blob" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
+          test "$low_level_blob" = "2909c16aed847c22693bfe094de3ff076003013b"
+      - name: Exercise exact private sender chain with Windows PowerShell 5.1
         shell: powershell
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\windows-powershell-5-1.json'
           .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
-      - name: Exercise exact production wrapper with PowerShell 7
+      - name: Exercise exact private sender chain with PowerShell 7
         shell: pwsh
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\powershell-7.json'
@@ -65,7 +70,7 @@ jobs:
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           ## Diagnostic-only boundary
-          Exercises the exact private production process-owned wrapper bytes and exact private strict-JSON helper bytes with a diagnostic near-wire sender stub.
-          Accepts only process-object-to-StandardInput stream construction and same-executable sibling-process rejection.
-          It does not prove the full private near-wire sender chain, lower-level stdio write gate, kernel pipe peer identity, delivery, MCP semantics, or final Windows state.
+          Exercises exact private bytes for the process-owned wrapper, strict JSON helper, canonical JSON helper, near-wire sender, and lower-level stdio sender using structurally-valid synthetic upstream receipts.
+          The diagnostic child reads the exact planned frame and a same-executable sibling process must be rejected before the sender chain.
+          This does not prove a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, physical server identity, authorization, semantic tool success, or final Windows state.
           EOF
