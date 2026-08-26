@@ -23,7 +23,7 @@ jobs:
       matrix:
         os: [windows-2022, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
+    timeout-minutes: 10
     steps:
       - name: Checkout exact diagnostic revision
         uses: actions/checkout@v4
@@ -50,11 +50,13 @@ jobs:
           test "$low_level_blob" = "2909c16aed847c22693bfe094de3ff076003013b"
       - name: Exercise exact private sender chain with Windows PowerShell 5.1
         shell: powershell
+        timeout-minutes: 3
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\windows-powershell-5-1.json'
           .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
       - name: Exercise exact private sender chain with PowerShell 7
         shell: pwsh
+        timeout-minutes: 3
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\powershell-7.json'
           .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
@@ -71,6 +73,7 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           ## Diagnostic-only boundary
           Exercises exact private bytes for the process-owned wrapper, strict JSON helper, canonical JSON helper, near-wire sender, and lower-level stdio sender using structurally-valid synthetic upstream receipts.
+          Each PowerShell exercise is time-bounded; a hang is a diagnostic failure rather than an indefinite green/pending state.
           The diagnostic child reads the exact planned frame and a same-executable sibling process must be rejected before the sender chain.
           This does not prove a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, physical server identity, authorization, semantic tool success, or final Windows state.
           EOF
