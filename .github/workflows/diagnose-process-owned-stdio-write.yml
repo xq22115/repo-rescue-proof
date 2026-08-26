@@ -1,0 +1,68 @@
+name: Diagnose Windows Process-Owned Stdio Write
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnose-process-owned-stdio-write.yml'
+      - 'diagnostics/process-owned/**'
+  push:
+    branches:
+      - 'diagnostic/process-owned-stdio-write-20260826'
+    paths:
+      - '.github/workflows/diagnose-process-owned-stdio-write.yml'
+      - 'diagnostics/process-owned/**'
+
+permissions:
+  contents: read
+
+jobs:
+  native-process-owned-write:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision and wrapper Git blob
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          actual_blob="$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)"
+          echo "wrapper_blob=$actual_blob"
+          test "$actual_blob" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
+      - name: Exercise exact production wrapper with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\windows-powershell-5-1.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+      - name: Exercise exact production wrapper with PowerShell 7
+        shell: pwsh
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\powershell-7.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-owned-stdio-write-${{ matrix.os }}
+          path: ${{ runner.temp }}/process-owned-stdio-evidence/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Acceptance boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Diagnostic-only boundary
+          Exercises the exact private production process-owned wrapper bytes with a diagnostic near-wire sender stub.
+          Accepts only process-object-to-StandardInput stream construction and same-executable sibling-process rejection.
+          It does not prove the full private near-wire sender chain, kernel pipe peer identity, delivery, MCP semantics, or final Windows state.
+          EOF
