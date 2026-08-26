@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "ac053e064a187305e5fbb5b49ccf95cd7d211161"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
       - name: Exercise abrupt worker termination and retained-lease recovery
@@ -53,7 +53,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo 'This canary only tests external worker termination after the exact private single-flight wrapper creates its lease, retained lease byte identity, and exact private recovery classification. It does not prove OS crash or power-loss durability, automatic recovery safety, exactly-once effects, delivery outcome, authorization, or semantic Windows state.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This canary tests external worker termination after the exact current private single-flight wrapper requests FileStream.Flush(true), retained lease byte identity, and exact private recovery classification. It does not prove OS crash or power-loss durability, automatic recovery safety, exactly-once effects, delivery outcome, authorization, or semantic Windows state.' >> "$GITHUB_STEP_SUMMARY"
 
   windows-latest:
     name: windows-latest / abrupt termination recovery
@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "ac053e064a187305e5fbb5b49ccf95cd7d211161"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
       - name: Exercise abrupt worker termination and retained-lease recovery
@@ -93,4 +93,4 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo 'This canary only tests external worker termination after the exact private single-flight wrapper creates its lease, retained lease byte identity, and exact private recovery classification. It does not prove OS crash or power-loss durability, automatic recovery safety, exactly-once effects, delivery outcome, authorization, or semantic Windows state.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This canary tests external worker termination after the exact current private single-flight wrapper requests FileStream.Flush(true), retained lease byte identity, and exact private recovery classification. It does not prove OS crash or power-loss durability, automatic recovery safety, exactly-once effects, delivery outcome, authorization, or semantic Windows state.' >> "$GITHUB_STEP_SUMMARY"
