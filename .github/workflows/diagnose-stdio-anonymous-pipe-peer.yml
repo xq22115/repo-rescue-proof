@@ -20,11 +20,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-latest]
+        shell: [powershell, pwsh]
         include:
-          - shell_name: Windows PowerShell 5.1
-            shell: powershell
-          - shell_name: PowerShell 7
-            shell: pwsh
+          - shell: powershell
+            shell_name: Windows PowerShell 5.1
+          - shell: pwsh
+            shell_name: PowerShell 7
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -125,7 +126,7 @@ jobs:
 
           $psi = New-Object System.Diagnostics.ProcessStartInfo
           $psi.FileName = $childExe
-          $psi.Arguments = '-NoLogo -NoProfile -NonInteractive -File "' + $childScript.Replace('"','\"') + '"'
+          $psi.Arguments = '-NoLogo -NoProfile -NonInteractive -File ' + $childScript
           $psi.UseShellExecute = $false
           $psi.CreateNoWindow = $true
           $psi.RedirectStandardInput = $true
