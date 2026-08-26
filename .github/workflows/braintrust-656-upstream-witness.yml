@@ -1,0 +1,38 @@
+name: Braintrust 656 Upstream Witness
+
+on:
+  push:
+    branches:
+      - audit/braintrust-656-upstream-witness-20260827
+  pull_request:
+    paths:
+      - ".github/workflows/braintrust-656-upstream-witness.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  exact-pin-network-witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify public upstream exact pin using bare Git only
+        shell: bash
+        env:
+          REMOTE: https://github.com/modelcontextprotocol/python-sdk.git
+          PIN: 6705402e246dc4eb1fcdf4d9902b78d3c9c36e1b
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_CONFIG_NOSYSTEM=1
+          export GIT_CONFIG_GLOBAL=/dev/null
+          cache="$RUNNER_TEMP/mcp-python-sdk.git"
+          git init --bare -- "$cache"
+          git --git-dir "$cache" remote add origin "$REMOTE"
+          git --git-dir "$cache" fetch --depth=1 --filter=blob:none --no-tags origin "$PIN"
+          observed="$(git --git-dir "$cache" rev-parse FETCH_HEAD)"
+          test "$observed" = "$PIN"
+          git --git-dir "$cache" update-ref refs/ordinary-chat/pinned "$PIN"
+          test "$(git --git-dir "$cache" rev-parse --is-bare-repository)" = true
+          test "$(git --git-dir "$cache" rev-parse refs/ordinary-chat/pinned)" = "$PIN"
+          printf 'remote=%s\npin=%s\nobserved=%s\nbare=true\n' "$REMOTE" "$PIN" "$observed"
