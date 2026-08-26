@@ -179,7 +179,7 @@ try {
         powerShellVersion = $PSVersionTable.PSVersion.ToString()
         osVersion = [Environment]::OSVersion.Version.ToString()
         architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
-        exactPrivateSingleFlightBlob = '36cd9a2f93bfd0012e799b6792effd0dc81e625d'
+        exactPrivateSingleFlightBlob = 'ac053e064a187305e5fbb5b49ccf95cd7d211161'
         exactPrivateStrictJsonBlob = '4bc29ae306b613aafcc37c4bc63e54e321a38eb2'
         exactPrivateRecoveryClassifierBlob = 'a504cb7374710171d46e7880bf36835059cdd892'
         abruptTermination = [ordered]@{
