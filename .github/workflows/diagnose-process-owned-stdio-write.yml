@@ -37,14 +37,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "4d7515669e68b4ae6a44413a04d2d3284921b934"
           test "$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
           test "$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
-      - name: Exercise exact private sender chain
+      - name: Exercise exact private sender policy boundary
         shell: powershell
-        timeout-minutes: 3
+        timeout-minutes: 1
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\result.json'
           .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
@@ -60,7 +60,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo 'PS5.1 sender-chain exercise is isolated and time-bounded; failure does not suppress PS7 evidence.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Windows PowerShell 5.1 is expected to receive a fast MCP_STDIO_TRANSPORT_HOST_UNSUPPORTED VETO; full exact-byte sender-chain execution is owned by PowerShell Core 7+.' >> "$GITHUB_STEP_SUMMARY"
 
   ps7:
     name: ${{ matrix.os }} / PowerShell 7
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "c77fcb64868f3ad9d7d927caea20512fb734f4d4"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "4d7515669e68b4ae6a44413a04d2d3284921b934"
           test "$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
           test "$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"

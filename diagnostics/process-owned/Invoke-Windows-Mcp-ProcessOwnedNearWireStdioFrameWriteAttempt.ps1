@@ -17,6 +17,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'MCP_STDIO_TRANSPORT_HOST_UNSUPPORTED: process-owned MCP stdio writes require PowerShell Core 7 or later; Windows PowerShell 5.1 is not accepted as an exact-byte stdio broker.'
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $strictHelper = Join-Path $scriptRoot 'Get-BraintrustStrictJsonScalar.ps1'
 $nearWireWriteGate = Join-Path $scriptRoot 'Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1'
@@ -210,6 +214,12 @@ $receipt = [ordered]@{
     generatedAtUtc = [datetime]::UtcNow.ToString('o')
     expectedProtocolVersion = $ExpectedProtocolVersion
     transport = $Transport
+    transportHostBinding = [ordered]@{
+        powerShellEdition = [string]$PSVersionTable.PSEdition
+        powerShellVersion = $PSVersionTable.PSVersion.ToString()
+        powerShellCore7OrLaterRequired = $true
+        windowsPowerShell51Accepted = $false
+    }
     processOwnershipBinding = [ordered]@{
         processId = $expectedPid
         processStartTimeUtc = $expectedStartTimeUtc.ToString('o')
@@ -237,6 +247,8 @@ $receipt = [ordered]@{
         childWriteAttemptReceiptSha256 = $childWriteSha256
     }
     acceptanceBoundary = [ordered]@{
+        powerShellCore7TransportHostAccepted = $true
+        windowsPowerShell51TransportHostAccepted = $false
         processOwnedStreamConstructionAccepted = $true
         targetProcessObjectIdentityMatchedSessionReceiptAtWriteBoundary = $true
         targetStreamDerivedFromBoundProcessObject = $true

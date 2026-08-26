@@ -63,6 +63,69 @@ Start-Sleep -Seconds 6
     [pscustomobject]@{ Process = $process; Script = $childScript }
 }
 
+if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
+    $started = [datetime]::UtcNow
+    $rejected = $false
+    $reason = ''
+    try {
+        & $wrapper `
+            -TargetProcess (Get-Process -Id $PID) `
+            -StdioSessionAffinityReceiptPath (Join-Path $env:RUNNER_TEMP 'intentionally-absent-session.json') `
+            -ExpectedStdioSessionAffinityReceiptSha256 ('00' * 32) `
+            -NearWireRevalidationReceiptPath (Join-Path $env:RUNNER_TEMP 'intentionally-absent-near-wire.json') `
+            -ExpectedNearWireRevalidationReceiptSha256 ('00' * 32) `
+            -FramePlanReceiptPath (Join-Path $env:RUNNER_TEMP 'intentionally-absent-frame-plan.json') `
+            -ExpectedFramePlanReceiptSha256 ('00' * 32) `
+            -ChildWriteAttemptReceiptPath (Join-Path $env:RUNNER_TEMP 'must-not-exist-child-write.json') `
+            -NearWireWriteReceiptPath (Join-Path $env:RUNNER_TEMP 'must-not-exist-near-write.json') `
+            -ReceiptPath (Join-Path $env:RUNNER_TEMP 'must-not-exist-wrapper.json') | Out-Null
+    } catch {
+        $reason = $_.Exception.Message
+        if ($reason -like 'MCP_STDIO_TRANSPORT_HOST_UNSUPPORTED:*') { $rejected = $true }
+    }
+    $elapsedMs = [int](([datetime]::UtcNow - $started).TotalMilliseconds)
+    if (-not $rejected) { throw "Windows PowerShell 5.1 was not rejected by the process-owned stdio transport boundary: $reason" }
+    if ($elapsedMs -gt 10000) { throw "Windows PowerShell 5.1 transport-host rejection was not fail-fast: ${elapsedMs}ms" }
+    $output = [ordered]@{
+        schemaVersion = 3
+        component = 'public-windows-process-owned-full-near-wire-stdio-canary'
+        diagnosticOnly = $true
+        shellLabel = $ShellLabel
+        powerShellEdition = $PSVersionTable.PSEdition
+        powerShellVersion = $PSVersionTable.PSVersion.ToString()
+        exactPrivateBlobs = [ordered]@{
+            processOwnedWrapper = '4d7515669e68b4ae6a44413a04d2d3284921b934'
+            strictJsonHelper = '4bc29ae306b613aafcc37c4bc63e54e321a38eb2'
+            canonicalJsonHelper = '0ed3d31e1bc13c20b5e4924b182ff77215f05893'
+            nearWireSender = 'e148dec284f5c9fd280c605f9ec9b095050d5fff'
+            lowerLevelSender = '2909c16aed847c22693bfe094de3ff076003013b'
+        }
+        unsupportedTransportHost = [ordered]@{
+            expectedPolicy = 'PowerShell Core 7 or later'
+            rejectionObserved = $true
+            rejectionReason = $reason
+            rejectionElapsedMilliseconds = $elapsedMs
+        }
+        acceptanceBoundary = [ordered]@{
+            exactProductionProcessOwnedWrapperBytesExercised = $true
+            windowsPowerShell51FailFastTransportVetoAccepted = $true
+            fullProductionNearWireSenderChainNativeAccepted = $false
+            nearWireSenderInvoked = $false
+            lowerLevelSenderInvoked = $false
+            liveDirectToolsListAcquired = $false
+            generationCurrentAtActualWireSendProven = $false
+            productionMcpServerReadObserved = $false
+            downstreamPhysicalServerIdentityAccepted = $false
+            toolExecutionAuthorized = $false
+            semanticToolAccepted = $false
+            windowsFinalStateAccepted = $false
+        }
+    }
+    Write-Json ([IO.Path]::GetFullPath($OutputPath)) $output
+    $output
+    return
+}
+
 $work = Join-Path $env:RUNNER_TEMP ('process-owned-full-chain-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $primary = Start-ProbeChild 'primary'
@@ -351,7 +414,7 @@ try {
     if ((Test-Path $siblingChildWrite) -or (Test-Path $siblingNearWrite) -or (Test-Path $siblingWrapper)) { throw 'sibling reached sender or wrapper receipt generation unexpectedly' }
 
     $output = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         component = 'public-windows-process-owned-full-near-wire-stdio-canary'
         diagnosticOnly = $true
         shellLabel = $ShellLabel
@@ -359,7 +422,7 @@ try {
         powerShellVersion = $PSVersionTable.PSVersion.ToString()
         osVersion = [Environment]::OSVersion.VersionString
         exactPrivateBlobs = [ordered]@{
-            processOwnedWrapper = 'c77fcb64868f3ad9d7d927caea20512fb734f4d4'
+            processOwnedWrapper = '4d7515669e68b4ae6a44413a04d2d3284921b934'
             strictJsonHelper = '4bc29ae306b613aafcc37c4bc63e54e321a38eb2'
             canonicalJsonHelper = '0ed3d31e1bc13c20b5e4924b182ff77215f05893'
             nearWireSender = 'e148dec284f5c9fd280c605f9ec9b095050d5fff'
