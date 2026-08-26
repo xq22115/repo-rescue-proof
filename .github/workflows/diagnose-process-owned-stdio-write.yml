@@ -23,7 +23,7 @@ jobs:
       matrix:
         os: [windows-2022, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - name: Checkout exact diagnostic revision
         uses: actions/checkout@v4
@@ -43,6 +43,8 @@ jobs:
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
           test "$(git hash-object diagnostics/process-owned/Read-Windows-Mcp-ProcessOwnedStdioResponseArtifact.ps1)" = "1800e2f6e8fe77053a398075e5eed0b2763ca95a"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
       - name: Exercise exact private sender policy boundary
         shell: powershell
         timeout-minutes: 1
@@ -55,6 +57,12 @@ jobs:
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\response-result.json'
           .\diagnostics\process-owned\Invoke-ProcessOwnedStdioResponseCaptureCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+      - name: Exercise exact private single-flight transport-host boundary
+        shell: powershell
+        timeout-minutes: 1
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\single-flight.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightLeaseCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,7 +75,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo 'Windows PowerShell 5.1 is expected to receive fast MCP_STDIO_TRANSPORT_HOST_UNSUPPORTED VETOs for both exact-byte request writes and process-owned response capture; full stdio transport execution is owned by PowerShell Core 7+.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Windows PowerShell 5.1 is expected to receive fast MCP_STDIO_TRANSPORT_HOST_UNSUPPORTED VETOs for exact-byte request writes, process-owned response capture, and the exact private runtime single-flight exchange; full stdio transport execution is owned by PowerShell Core 7+.' >> "$GITHUB_STEP_SUMMARY"
 
   ps7:
     name: ${{ matrix.os }} / PowerShell 7
@@ -76,7 +84,7 @@ jobs:
       matrix:
         os: [windows-2022, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 6
+    timeout-minutes: 10
     steps:
       - name: Checkout exact diagnostic revision
         uses: actions/checkout@v4
@@ -96,6 +104,8 @@ jobs:
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
           test "$(git hash-object diagnostics/process-owned/Read-Windows-Mcp-ProcessOwnedStdioResponseArtifact.ps1)" = "1800e2f6e8fe77053a398075e5eed0b2763ca95a"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
       - name: Exercise exact private sender chain
         shell: pwsh
         timeout-minutes: 3
@@ -108,6 +118,12 @@ jobs:
         run: |
           $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\response-result.json'
           .\diagnostics\process-owned\Invoke-ProcessOwnedStdioResponseCaptureCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Exercise exact private runtime single-flight lease
+        shell: pwsh
+        timeout-minutes: 4
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\single-flight.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightLeaseCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,8 +137,9 @@ jobs:
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          Exercises exact private bytes for the process-owned request wrapper, strict JSON helper, canonical JSON helper, near-wire sender, lower-level stdio sender, and process-owned response-capture primitive using structurally-valid synthetic upstream receipts.
+          Exercises exact private bytes for the process-owned request wrapper, strict JSON helper, canonical JSON helper, near-wire sender, lower-level stdio sender, process-owned response-capture primitive, and exact private runtime single-flight exchange.
           The request diagnostic child reads the exact planned frame and a same-executable sibling process must be rejected before the sender chain.
           The response diagnostic child emits one raw UTF-8 LF-delimited JSON-RPC response; the exact private response-capture primitive must read it only through the bound Process.StandardOutput.BaseStream, bind the response id to the frame-plan request id, and reject a same-executable sibling before reading.
-          This does not prove a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, kernel pipe-peer identity, cryptographic response origin, physical server identity, authorization, semantic tool success, or final Windows state.
+          The single-flight canary isolates lease semantics with diagnostic write/response stubs: two sequential calls must reacquire after successful release; an overlapping same-session caller must be rejected while the winner holds the lease; an injected post-acquisition failure must retain the lease and block same-session retry until explicit diagnostic cleanup.
+          This does not prove abrupt process-crash recovery, power-loss durability, exactly-once tool side effects, a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, kernel pipe-peer identity, cryptographic response origin, physical server identity, authorization, semantic tool success, or final Windows state.
           EOF
