@@ -10,6 +10,15 @@ on:
       - 'diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1'
       - 'diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1'
       - 'diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/diagnose-stdio-abrupt-termination.yml'
+      - 'diagnostics/process-owned/Invoke-StdioSingleFlightAbruptTerminationCanary.ps1'
+      - 'diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1'
+      - 'diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1'
+      - 'diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1'
 
 permissions:
   contents: read
@@ -23,12 +32,12 @@ jobs:
       - name: Checkout exact diagnostic revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
       - name: Read back exact revision and private Git blobs
         shell: bash
         env:
-          EXPECTED_HEAD_SHA: ${{ github.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
@@ -63,12 +72,12 @@ jobs:
       - name: Checkout exact diagnostic revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
       - name: Read back exact revision and private Git blobs
         shell: bash
         env:
-          EXPECTED_HEAD_SHA: ${{ github.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
