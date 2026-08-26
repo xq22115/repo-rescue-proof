@@ -43,7 +43,7 @@ jobs:
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
           test "$(git hash-object diagnostics/process-owned/Read-Windows-Mcp-ProcessOwnedStdioResponseArtifact.ps1)" = "1800e2f6e8fe77053a398075e5eed0b2763ca95a"
-          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "ac053e064a187305e5fbb5b49ccf95cd7d211161"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
       - name: Exercise exact private sender policy boundary
@@ -105,7 +105,7 @@ jobs:
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
           test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
           test "$(git hash-object diagnostics/process-owned/Read-Windows-Mcp-ProcessOwnedStdioResponseArtifact.ps1)" = "1800e2f6e8fe77053a398075e5eed0b2763ca95a"
-          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "36cd9a2f93bfd0012e799b6792effd0dc81e625d"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "ac053e064a187305e5fbb5b49ccf95cd7d211161"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
           test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
       - name: Exercise exact private sender chain
@@ -145,10 +145,10 @@ jobs:
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          Exercises exact private bytes for the process-owned request wrapper, strict JSON helper, canonical JSON helper, near-wire sender, lower-level stdio sender, process-owned response-capture primitive, exact private runtime single-flight exchange, and exact private retained-lease recovery classifier.
+          Exercises exact private bytes for the process-owned request wrapper, strict JSON helper, canonical JSON helper, near-wire sender, lower-level stdio sender, process-owned response-capture primitive, exact current private runtime single-flight exchange (which requests FileStream.Flush(true) before effectuation), and exact private retained-lease recovery classifier.
           The request diagnostic child reads the exact planned frame and a same-executable sibling process must be rejected before the sender chain.
           The response diagnostic child emits one raw UTF-8 LF-delimited JSON-RPC response; the exact private response-capture primitive must read it only through the bound Process.StandardOutput.BaseStream, bind the response id to the frame-plan request id, and reject a same-executable sibling before reading.
           The single-flight canary isolates lease semantics with diagnostic write/response stubs: two sequential calls must reacquire after successful release; an overlapping same-session caller must be rejected while the winner holds the lease; an injected post-acquisition failure must retain the lease and block same-session retry until explicit diagnostic cleanup.
-          The abrupt-termination canary then externally terminates a PowerShell 7 process after the exact private single-flight exchange has created its session lease. The exact private recovery classifier must first classify the live lease as live-session-busy, then classify the unchanged retained lease after termination as abandoned-session-process-missing, require a fresh session/manual recovery, and never delete the lease or authorize retry/replay.
+          The abrupt-termination canary then externally terminates a PowerShell 7 process after the exact private single-flight exchange has created and flush-to-disk-requested its session lease. The exact private recovery classifier must first classify the live lease as live-session-busy, then classify the unchanged retained lease after termination as abandoned-session-process-missing, require a fresh session/manual recovery, and never delete the lease or authorize retry/replay.
           This does not prove abrupt OS crash or power-loss durability, exactly-once tool side effects, a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, kernel pipe-peer identity, cryptographic response origin, physical server identity, authorization, semantic tool success, or final Windows state.
           EOF
