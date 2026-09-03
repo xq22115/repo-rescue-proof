@@ -1,20 +1,237 @@
-# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 language: "zh-TW"
+tone_instructions: "使用繁體中文（台灣用語）；優先找出可驗證的正確性、安全性、相容性、效能與測試風險，並給可直接執行的修正。"
 early_access: true
+enable_free_tier: true
+inheritance: true
+
 reviews:
   profile: "assertive"
   request_changes_workflow: true
   high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  auto_title_instructions: "產生清楚、具體、可搜尋的 PR 標題，描述實際行為變更並避免模糊的 fix/update。"
   review_status: true
   review_details: true
   review_progress: true
+  commit_status: true
+  fail_commit_status: true
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: true
+  suggested_reviewers: true
+  auto_assign_reviewers: true
+  in_progress_fortune: true
+  poem: true
+  enable_prompt_for_ai_agents: true
+  abort_on_close: true
+  disable_cache: false
+  slop_detection:
+    enabled: true
   auto_review:
     enabled: true
     auto_incremental_review: true
     auto_pause_after_reviewed_commits: 0
     drafts: true
+    base_branches:
+      - ".*"
+  path_instructions:
+    - path: "**/*.{ts,tsx,js,jsx,mjs,cjs}"
+      instructions: "檢查型別與執行期錯誤、非同步/競態、資源釋放、注入與供應鏈風險、API 相容性、邊界條件與測試覆蓋。"
+    - path: "**/*.py"
+      instructions: "檢查型別、例外路徑、資源管理、並行/非同步、安全性、資料邊界與測試覆蓋。"
+    - path: "**/*.{yml,yaml,json,toml}"
+      instructions: "檢查 CI/CD、最小權限、secret 暴露、供應鏈、部署安全、破壞性設定與跨環境相容性。"
+    - path: "**/*.{md,mdx}"
+      instructions: "確認文件、指令與目前程式行為一致；API/CLI/設定有變更時同步必要文件。"
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: true
+    autofix:
+      enabled: true
+    fix_ci:
+      enabled: true
+    resolve_merge_conflict:
+      enabled: true
+    custom:
+      - enabled: true
+        name: "security hardening"
+        instructions: "檢查並修正本 PR 直接相關的秘密/PII 暴露、注入、權限過寬、不安全預設、供應鏈與危險命令執行；只做有證據的最小安全修正。"
+      - enabled: true
+        name: "test coverage"
+        instructions: "為本 PR 的行為變更補高價值單元、整合或回歸測試，優先覆蓋失敗路徑、邊界與曾出錯條件。"
+      - enabled: true
+        name: "performance pass"
+        instructions: "找出本 PR 引入的 N+1、重複 I/O、無界迴圈/記憶體、阻塞熱點與可安全簡化的複雜度；只修可驗證且不改語意的問題。"
+      - enabled: true
+        name: "dependency cleanup"
+        instructions: "檢查本 PR 相關依賴的未使用、重複、危險 lifecycle script、過度權限、lockfile 漂移與可用原生 API 取代之處，保留相容性。"
+      - enabled: true
+        name: "docs sync"
+        instructions: "把本 PR 的對外行為、API、CLI、環境變數、schema、部署或遷移變更同步到必要文件、範例與 release notes，不改無關內容。"
+  pre_merge_checks:
+    override_requested_reviewers_only: false
+    docstrings:
+      mode: "warning"
+      threshold: 80
+    title:
+      mode: "warning"
+      requirements: "標題必須清楚、具體並描述實際變更，避免模糊的 fix/update。"
+    description:
+      mode: "warning"
+    issue_assessment:
+      mode: "warning"
+    custom_checks:
+      - mode: "error"
+        name: "Secrets and sensitive data"
+        instructions: "Fail if the PR introduces hardcoded credentials, tokens, private keys, passwords, or exposes sensitive data without a safe redaction mechanism."
+      - mode: "warning"
+        name: "Behavior change has tests"
+        instructions: "Warn if changed production behavior lacks an appropriate regression, unit, or integration test unless testing is demonstrably not applicable."
+      - mode: "warning"
+        name: "Breaking changes documented"
+        instructions: "Warn if public API, CLI, environment variable, schema, protocol, or configuration changes incompatibly without migration or release documentation."
+      - mode: "warning"
+        name: "Dependency supply chain"
+        instructions: "Warn on suspicious new dependencies, unpinned remote execution, install/postinstall hooks, source downloads, or lockfile drift without justification."
+      - mode: "warning"
+        name: "CI and workflow safety"
+        instructions: "Warn if CI/CD changes widen token permissions, expose secrets to untrusted code, use mutable third-party action refs, or deploy from untrusted pull-request context."
+  post_merge_actions:
+    - enabled: true
+      name: "post-merge regression audit"
+      prompt: "檢查剛合併變更是否留下高嚴重度 correctness/security/CI 回歸；只有在有具體可驗證問題時才建立後續修正，不為風格偏好製造工作。"
+    - enabled: true
+      name: "post-merge docs and release sync"
+      prompt: "檢查剛合併的對外行為、設定、API、CLI、schema、部署或遷移變更是否同步必要文件與 release notes；只在真實缺漏時建立最小修正。"
+  tools:
+    ast-grep:
+      essential_rules: true
+    shellcheck: { enabled: true }
+    ruff: { enabled: true }
+    markdownlint: { enabled: true }
+    github-checks: { enabled: true }
+    languagetool:
+      enabled: true
+      level: "picky"
+    biome: { enabled: true }
+    hadolint: { enabled: true }
+    swiftlint: { enabled: true }
+    phpstan: { enabled: true }
+    phpmd: { enabled: true }
+    phpcs: { enabled: true }
+    golangci-lint: { enabled: true }
+    yamllint: { enabled: true }
+    gitleaks: { enabled: true }
+    trufflehog: { enabled: true }
+    checkov: { enabled: true }
+    tflint: { enabled: true }
+    detekt: { enabled: true }
+    eslint:
+      enabled: true
+      e18e:
+        enabled: true
+    flake8: { enabled: true }
+    fbinfer: { enabled: true }
+    fortitudeLint: { enabled: true }
+    rubocop: { enabled: true }
+    buf: { enabled: true }
+    regal: { enabled: true }
+    actionlint: { enabled: true }
+    zizmor: { enabled: true }
+    pmd: { enabled: true }
+    clang: { enabled: true }
+    cppcheck: { enabled: true }
+    vale: { enabled: true }
+    verilator: { enabled: true }
+    opengrep: { enabled: true }
+    semgrep: { enabled: true }
+    circleci: { enabled: true }
+    clippy: { enabled: true }
+    sqlfluff: { enabled: true }
+    squawk: { enabled: true }
+    trivy: { enabled: true }
+    prismaLint: { enabled: true }
+    pylint: { enabled: true }
+    oxc: { enabled: true }
+    shopifyThemeCheck: { enabled: true }
+    luacheck: { enabled: true }
+    brakeman: { enabled: true }
+    dotenvLint: { enabled: true }
+    htmlhint: { enabled: true }
+    stylelint: { enabled: true }
+    checkmake: { enabled: true }
+    osvScanner: { enabled: true }
+    oasdiff: { enabled: true }
+    reactDoctor: { enabled: true }
+    presidio: { enabled: true }
+    blinter: { enabled: true }
+    smartyLint: { enabled: true }
+    emberTemplateLint: { enabled: true }
+    skillspector: { enabled: true }
+    psscriptanalyzer: { enabled: true }
+
 chat:
+  art: true
+  allow_non_org_members: true
   auto_reply: true
+  integrations:
+    jira:
+      usage: "auto"
+    linear:
+      usage: "auto"
+
 knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
   code_guidelines:
     enabled: true
+  learnings:
+    scope: "auto"
+    approval_delay: 0
+  issues:
+    scope: "auto"
+  jira:
+    usage: "auto"
+  linear:
+    usage: "auto"
+  pull_requests:
+    scope: "auto"
+  mcp:
+    usage: "auto"
+    disabled_servers: []
+  automatic_linking_mode: "auto"
+
+code_generation:
+  docstrings:
+    language: "zh-TW"
+    path_instructions:
+      - path: "**/*"
+        instructions: "僅為公開介面或非直觀複雜邏輯補有資訊量的 docstring，說明契約、輸入輸出、例外與重要副作用，避免重述程式碼。"
+  unit_tests:
+    path_instructions:
+      - path: "**/*"
+        instructions: "優先產生可重現失敗路徑、邊界條件、權限/安全性、並行與回歸風險的高價值測試；避免脆弱的實作細節測試。"
+
+issue_enrichment:
+  auto_enrich:
+    enabled: true
+  planning:
+    enabled: true
+    auto_planning:
+      enabled: true
+      labels:
+        - "!coderabbit-skip-plan"
+  labeling:
+    auto_apply_labels: true
