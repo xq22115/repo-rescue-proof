@@ -1,0 +1,73 @@
+name: Diagnose Windows Stdio Anonymous Pipe Peer Identity
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnose-stdio-anonymous-pipe-peer.yml'
+      - 'diagnostics/Invoke-StdioAnonymousPipePeerObservation.ps1'
+  push:
+    branches:
+      - 'diagnostic/stdio-anonymous-pipe-peer-20260826'
+    paths:
+      - '.github/workflows/diagnose-stdio-anonymous-pipe-peer.yml'
+      - 'diagnostics/Invoke-StdioAnonymousPipePeerObservation.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  native-observation:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Read back exact diagnostic revision
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "expected=$EXPECTED_HEAD_SHA"
+          echo "actual=$actual"
+          test "$actual" = "$EXPECTED_HEAD_SHA"
+
+      - name: Probe redirected stdio peer identity with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'stdio-pipe-peer-evidence\windows-powershell-5-1.json'
+          .\diagnostics\Invoke-StdioAnonymousPipePeerObservation.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+
+      - name: Probe redirected stdio peer identity with PowerShell 7
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'stdio-pipe-peer-evidence\powershell-7.json'
+          .\diagnostics\Invoke-StdioAnonymousPipePeerObservation.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdio-anonymous-pipe-peer-${{ matrix.os }}
+          path: ${{ runner.temp }}/stdio-pipe-peer-evidence/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Acceptance boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Diagnostic-only boundary
+          This workflow observes whether Win32 named-pipe process-id APIs return useful process identity for the anonymous pipes behind redirected stdio.
+          It does not authorize using those APIs as production stream ownership evidence unless the native observations support that stronger claim and a separate production contract is created.
+          It contains no private Braintrust receipts, secrets, or production MCP runtime data.
+          EOF
