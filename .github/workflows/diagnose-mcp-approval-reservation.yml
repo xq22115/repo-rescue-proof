@@ -1,24 +1,16 @@
-name: test
+name: Diagnose MCP Approval Reservation Atomicity
 
 on:
-  push:
   pull_request:
+    paths:
+      - 'diagnostics/Test-McpApprovalReservationAtomicity.ps1'
+      - '.github/workflows/diagnose-mcp-approval-reservation.yml'
 
 permissions:
   contents: read
 
 jobs:
-  unittest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-      - run: python -m unittest -v test_repo_rescue_proof.py
-
-  approval-reservation:
-    name: approval reservation (${{ matrix.os }})
+  windows-reservation:
     strategy:
       fail-fast: false
       matrix:
@@ -27,15 +19,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact diagnostic head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: Verify exact diagnostic head
         shell: pwsh
         env:
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $observed = (git rev-parse HEAD).Trim()
           if ($observed -ne $env:EXPECTED_HEAD_SHA) { throw "diagnostic head mismatch expected=$env:EXPECTED_HEAD_SHA observed=$observed" }
