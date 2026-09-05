@@ -1,0 +1,112 @@
+name: Diagnose Process.Modules cross-bitness completeness
+
+on:
+  push:
+    branches:
+      - diagnostic/windows-processmodules-bitness-20260824
+    paths:
+      - 'diagnostics/windows-processmodules-bitness-canary.ps1'
+      - 'diagnostics/Get-Windows-ProcessModulesArchitectureEvidence.ps1'
+      - 'diagnostics/test-processmodules-architecture-helper.ps1'
+      - 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
+      - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
+  pull_request:
+    paths:
+      - 'diagnostics/windows-processmodules-bitness-canary.ps1'
+      - 'diagnostics/Get-Windows-ProcessModulesArchitectureEvidence.ps1'
+      - 'diagnostics/test-processmodules-architecture-helper.ps1'
+      - 'diagnostics/Get-Windows-ProcessModuleInventory.ps1'
+      - '.github/workflows/diagnose-processmodules-cross-bitness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  processmodules-cross-bitness:
+    name: ${{ matrix.image }} / ${{ matrix.shell }}
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: windows-2022
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-2022
+            shell: pwsh
+            expectedEdition: Core
+          - image: windows-latest
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-latest
+            shell: pwsh
+            expectedEdition: Core
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact diagnostic revision and helper identity
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $observedHead = (git rev-parse HEAD).Trim()
+          if ($observedHead -ne $env:EXPECTED_HEAD_SHA) { throw "Checkout head mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$observedHead" }
+          $moduleBlob = (git hash-object diagnostics/Get-Windows-ProcessModuleInventory.ps1).Trim()
+          if ($moduleBlob -ne '9481e1b4d25ec3977614b554d252aa84275dca48') { throw "Process module inventory helper drifted. actual=$moduleBlob" }
+          Write-Host "DIAGNOSTIC_HEAD=$observedHead"
+          Write-Host "PROCESS_MODULE_INVENTORY_GIT_BLOB=$moduleBlob"
+
+      - name: Cross-bitness canary
+        shell: ${{ matrix.shell }}
+        env:
+          EXPECTED_EDITION: ${{ matrix.expectedEdition }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]$PSVersionTable.PSEdition -ne $env:EXPECTED_EDITION) {
+            throw "Unexpected PowerShell edition. expected=$env:EXPECTED_EDITION actual=$($PSVersionTable.PSEdition)"
+          }
+          .\diagnostics\windows-processmodules-bitness-canary.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP ('cross-bitness-' + [guid]::NewGuid().ToString('N') + '.json'))
+
+      - name: Architecture helper contract
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\diagnostics\test-processmodules-architecture-helper.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP ('architecture-' + [guid]::NewGuid().ToString('N')))
+
+      - name: Integrated inventory v2
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $current = Get-Process -Id $PID
+          $path = $null
+          try { $path = [string]$current.Path } catch { }
+          if ([string]::IsNullOrWhiteSpace($path)) { $path = [string]$current.MainModule.FileName }
+          $path = [IO.Path]::GetFullPath($path)
+          $sha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          $receiptPath = Join-Path $env:RUNNER_TEMP ('integrated-v2-' + [guid]::NewGuid().ToString('N') + '.json')
+          $result = & .\diagnostics\Get-Windows-ProcessModuleInventory.ps1 -ProcessId $PID -ExpectedExecutablePath $path -ExpectedExecutableSha256 $sha -OutputReceiptPath $receiptPath
+          if (-not [bool]$result.processModulesSameArchitecturePrerequisiteAccepted) { throw 'Same-architecture prerequisite was not accepted.' }
+          if ([bool]$result.processModulesEnumerationCompletenessProven) { throw 'Process.Modules completeness must remain unproven.' }
+          $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ([int]$receipt.schemaVersion -ne 2) { throw 'Unexpected integrated inventory schema.' }
+          if (-not [bool]$receipt.acceptanceBoundary.moduleInventorySnapshotAccepted) { throw 'Integrated module inventory was not accepted.' }
+          if ([bool]$receipt.acceptanceBoundary.processModulesEnumerationCompletenessProven) { throw 'Receipt overclaimed Process.Modules completeness.' }
+          Write-Host "INTEGRATED_V2=PASS MODULES=$($receipt.moduleInventory.moduleCount) MACHINE=$($receipt.process.effectiveMachine)"
+
+      - name: State acceptance boundary
+        shell: pwsh
+        run: |
+          @'
+          ## Process.Modules cross-bitness diagnostic
+
+          - This workflow owns only the cross-bitness / architecture-prerequisite / integrated schema-v2 inventory checks.
+          - Spawned-process lifetime binding is owned by the separate `Validate Spawn-Bound Process Module Inventory` workflow so helper identity changes do not create duplicated stale pins here.
+          - Same architecture is necessary but does not prove Process.Modules enumeration completeness, dependent-module trust, late-load coverage, mapped-image identity, MCP protocol health, tool semantics, or final Windows state.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

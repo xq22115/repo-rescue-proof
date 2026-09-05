@@ -16,3 +16,118 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest -v test_repo_rescue_proof.py
+
+  spawn-bound-native:
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'diagnostic/windows-processmodules-bitness-20260824') ||
+      (github.event_name == 'push' && github.ref_name == 'diagnostic/windows-processmodules-bitness-20260824')
+    name: Spawn-bound ${{ matrix.image }} / ${{ matrix.shell }}
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: windows-2022
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-2022
+            shell: pwsh
+            expectedEdition: Core
+          - image: windows-latest
+            shell: powershell
+            expectedEdition: Desktop
+          - image: windows-latest
+            shell: pwsh
+            expectedEdition: Core
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact diagnostic revision and helper identities
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $observedHead = (git rev-parse HEAD).Trim()
+          if ($observedHead -ne $env:EXPECTED_HEAD_SHA) { throw "Checkout head mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$observedHead" }
+          $expected = @{
+            'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1' = 'e15948dfa1e308c06250433ddf8c3d4718b3aa5b'
+            'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1' = '03017f8125baf56eae4046441e50356f7c643be5'
+            'diagnostics/Get-Windows-ProcessModuleInventory.ps1' = '9481e1b4d25ec3977614b554d252aa84275dca48'
+          }
+          foreach ($path in $expected.Keys) {
+            $observed = (git hash-object $path).Trim()
+            if ($observed -ne $expected[$path]) { throw "Helper blob drifted. path=$path expected=$($expected[$path]) actual=$observed" }
+            Write-Host "HELPER_BLOB[$path]=$observed"
+          }
+          Write-Host "DIAGNOSTIC_HEAD=$observedHead"
+
+      - name: Run spawn-bound process/module lifetime contract
+        shell: ${{ matrix.shell }}
+        env:
+          EXPECTED_EDITION: ${{ matrix.expectedEdition }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          if ([string]$PSVersionTable.PSEdition -ne $env:EXPECTED_EDITION) { throw "Unexpected PowerShell edition. expected=$env:EXPECTED_EDITION actual=$($PSVersionTable.PSEdition)" }
+
+          $spawnHelper = Join-Path $PWD 'diagnostics/Get-Windows-Mcp-SpawnedProcessIdentityEvidence.ps1'
+          $boundHelper = Join-Path $PWD 'diagnostics/Get-Windows-Mcp-SpawnBoundProcessModuleInventoryEvidence.ps1'
+          $current = Get-Process -Id $PID -ErrorAction Stop
+          $currentPath = $null
+          try { $currentPath = [string]$current.Path } catch { }
+          if ([string]::IsNullOrWhiteSpace($currentPath)) { try { $currentPath = [string]$current.MainModule.FileName } catch { } }
+          if ([string]::IsNullOrWhiteSpace($currentPath)) { throw 'Unable to resolve current PowerShell executable.' }
+          $currentPath = [IO.Path]::GetFullPath($currentPath)
+          $currentSha = (Get-FileHash -LiteralPath $currentPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $currentPath
+          $psi.Arguments = '-NoLogo -NoProfile -Command "Start-Sleep -Seconds 60"'
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $child = New-Object Diagnostics.Process
+          $child.StartInfo = $psi
+          try {
+            $spawnStart = [datetimeoffset]::UtcNow
+            if (-not $child.Start()) { throw 'child start failed' }
+            $spawnEnd = [datetimeoffset]::UtcNow
+            $spawnReceipt = Join-Path $env:RUNNER_TEMP ('spawn-' + [guid]::NewGuid().ToString('N') + '.json')
+            $boundReceipt = Join-Path $env:RUNNER_TEMP ('bound-' + [guid]::NewGuid().ToString('N') + '.json')
+            $spawn = & $spawnHelper -ProcessId $child.Id -ExpectedExecutablePath $currentPath -ExpectedExecutableSha256 $currentSha -SpawnWindowStartUtc $spawnStart.ToString('o') -SpawnWindowEndUtc $spawnEnd.ToString('o') -ReceiptPath $spawnReceipt
+            $bound = & $boundHelper -SpawnedProcessIdentityReceiptPath $spawnReceipt -SpawnedProcessIdentityReceiptSha256 $spawn.receiptSha256 -ReceiptPath $boundReceipt
+            if (-not [bool]$bound.moduleInventoryBoundToSpawnedProcessLifetime) { throw 'Spawn-bound module inventory was not accepted.' }
+            if (-not [bool]$bound.processModulesSameArchitecturePrerequisiteAccepted) { throw 'Same-architecture prerequisite was not accepted.' }
+            if ([bool]$bound.processLifetimeRaceFree) { throw 'Process lifetime must remain explicitly non-race-free.' }
+            if ([bool]$bound.processModulesEnumerationCompletenessProven) { throw 'Process.Modules completeness must remain unproven.' }
+            if ([bool]$bound.dependentModuleTrustAccepted) { throw 'Dependent-module trust must remain unaccepted.' }
+            $receipt = Get-Content -LiteralPath $boundReceipt -Raw | ConvertFrom-Json
+            if ([int]$receipt.schemaVersion -ne 1) { throw 'Unexpected spawn-bound receipt schema.' }
+            if ([int]$receipt.spawnedProcessIdentity.pid -ne $child.Id) { throw 'Spawn-bound receipt PID mismatch.' }
+            if (-not [bool]$receipt.acceptanceBoundary.liveProcessReboundBeforeModuleInventory -or -not [bool]$receipt.acceptanceBoundary.liveProcessReboundAfterModuleInventory) { throw 'Lifetime read-back evidence missing.' }
+            Write-Host 'SPAWN_BOUND_NATIVE=PASS'
+            Write-Host "POWERSHELL_EDITION=$($PSVersionTable.PSEdition)"
+            Write-Host "POWERSHELL_VERSION=$($PSVersionTable.PSVersion)"
+            Write-Host "MODULE_COUNT=$($bound.moduleCount)"
+            Write-Host "MODULE_SET_FINGERPRINT_SHA256=$($bound.moduleSetFingerprintSha256)"
+          } finally {
+            try { if ($null -ne $child -and -not $child.HasExited) { $child.Kill(); [void]$child.WaitForExit(5000) } } catch { }
+            if ($null -ne $child) { $child.Dispose() }
+          }
+
+      - name: State acceptance boundary
+        shell: pwsh
+        run: |
+          @'
+          ## Spawn-bound module inventory canary
+
+          - Executes exact private helper bytes on native GitHub-hosted Windows.
+          - Accepts only same observed PID lifetime (PID + StartTime + image path/SHA) around module inventory.
+          - Does not prove race-free lifetime binding, Process.Modules completeness, module trust, late-load coverage, downstream MCP server identity, protocol health, semantics, or final Windows state.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+# Revalidation marker: 2026-08-25 native spawn-bound matrix.
