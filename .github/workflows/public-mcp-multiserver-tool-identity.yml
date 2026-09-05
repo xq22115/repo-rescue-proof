@@ -1,0 +1,73 @@
+name: Public MCP Multi-Server Tool Identity Canary
+
+on:
+  push:
+    branches:
+      - diagnostics/public-standard-hosted-runner-canary-20260822
+    paths:
+      - 'diagnostics/mcp-multiserver-tool-identity/**'
+      - '.github/workflows/public-mcp-multiserver-tool-identity.yml'
+  pull_request:
+    paths:
+      - 'diagnostics/mcp-multiserver-tool-identity/**'
+      - '.github/workflows/public-mcp-multiserver-tool-identity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: ${{ matrix.os }} multi-server identity
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $observed = (git rev-parse HEAD).Trim()
+          if ($observed -ne $env:EXPECTED_HEAD_SHA) { throw "head mismatch: expected=$env:EXPECTED_HEAD_SHA observed=$observed" }
+          "DIAGNOSTIC_HEAD=$observed"
+          "WINDOWS_VERSION=$([Environment]::OSVersion.VersionString)"
+          "POWERSHELL7_VERSION=$($PSVersionTable.PSVersion)"
+
+      - name: Windows PowerShell 5.1 multi-server identity contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; observed $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+          }
+          ./diagnostics/mcp-multiserver-tool-identity/Test-Mcp-MultiServerToolIdentity.ps1
+
+      - name: PowerShell 7 multi-server identity contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
+            throw "Expected PowerShell Core 7+; observed $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+          }
+          ./diagnostics/mcp-multiserver-tool-identity/Test-Mcp-MultiServerToolIdentity.ps1
+
+      - name: State acceptance boundary
+        shell: pwsh
+        run: |
+          @"
+          ## MCP multi-server tool identity diagnostic
+
+          - Validates structured server identity plus globally unique model-visible tool names.
+          - Demonstrates that naive server-name prefix concatenation is not injective.
+          - Does not prove live MCP server identity, current catalog generation, authorization, semantic tool execution, or Windows final state.
+          "@ >> $env:GITHUB_STEP_SUMMARY

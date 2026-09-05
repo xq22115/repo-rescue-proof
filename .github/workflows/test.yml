@@ -16,3 +16,108 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest -v test_repo_rescue_proof.py
+
+  windows-2022-assignment-canary:
+    runs-on: windows-2022
+    steps:
+      - name: Mark runner started
+        shell: pwsh
+        run: |
+          Write-Output 'runner_started=true'
+          Write-Output "runner_os=${{ runner.os }}"
+          Write-Output "runner_arch=${{ runner.arch }}"
+
+  windows-latest-assignment-canary:
+    runs-on: windows-latest
+    steps:
+      - name: Mark runner started
+        shell: pwsh
+        run: |
+          Write-Output 'runner_started=true'
+          Write-Output "runner_os=${{ runner.os }}"
+          Write-Output "runner_arch=${{ runner.arch }}"
+
+  powershell-automatic-variable-guard:
+    name: ${{ matrix.os }} PowerShell automatic-variable guard
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Mark native Windows guard started
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nativeWindowsObserved = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+          if (-not $nativeWindowsObserved) { throw 'POWERSHELL_AUTOMATIC_VARIABLE_GUARD_NOT_WINDOWS' }
+          if ($env:RUNNER_OS -ne 'Windows') { throw "RUNNER_OS_MISMATCH observed=$env:RUNNER_OS" }
+          if (-not [Environment]::Is64BitOperatingSystem) { throw 'POWERSHELL_AUTOMATIC_VARIABLE_GUARD_REQUIRES_64BIT_WINDOWS' }
+          Write-Output 'runner_started=true'
+          Write-Output "runner_os=$env:RUNNER_OS"
+          Write-Output "runner_arch=$env:RUNNER_ARCH"
+          Write-Output "os_version=$([Environment]::OSVersion.VersionString)"
+
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify Windows PowerShell 5.1 runtime identity
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Desktop') {
+            throw "Expected Windows PowerShell Desktop edition, observed $($PSVersionTable.PSEdition)."
+          }
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1, observed $($PSVersionTable.PSVersion)."
+          }
+          Write-Output "powershell_edition=$($PSVersionTable.PSEdition)"
+          Write-Output "powershell_version=$($PSVersionTable.PSVersion)"
+
+      - name: Run automatic-variable guard with Windows PowerShell 5.1
+        shell: powershell
+        run: .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1 -Root .\diagnostics\powershell-automatic-variable-guard
+
+      - name: Probe automatic-variable mutation surfaces with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\diagnostics\powershell-variable-mutation-canary\Invoke-VariableMutationProbe.ps1 `
+            -OutputPath ".\mutation-evidence\${{ matrix.os }}-powershell-5.1.json" `
+            -RunnerImage '${{ matrix.os }}'
+
+      - name: Verify PowerShell 7 runtime identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Core') {
+            throw "Expected PowerShell Core edition, observed $($PSVersionTable.PSEdition)."
+          }
+          if ($PSVersionTable.PSVersion.Major -lt 7) {
+            throw "Expected PowerShell 7 or later, observed $($PSVersionTable.PSVersion)."
+          }
+          Write-Output "powershell_edition=$($PSVersionTable.PSEdition)"
+          Write-Output "powershell_version=$($PSVersionTable.PSVersion)"
+
+      - name: Run automatic-variable guard with PowerShell 7
+        shell: pwsh
+        run: .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1 -Root .\diagnostics\powershell-automatic-variable-guard
+
+      - name: Probe automatic-variable mutation surfaces with PowerShell 7
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-mutation-canary\Invoke-VariableMutationProbe.ps1 `
+            -OutputPath ".\mutation-evidence\${{ matrix.os }}-powershell-7.json" `
+            -RunnerImage '${{ matrix.os }}'
+
+      - name: Upload automatic-variable mutation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: powershell-variable-mutation-${{ matrix.os }}-${{ github.run_id }}
+          path: mutation-evidence/
+          if-no-files-found: error
+          retention-days: 14

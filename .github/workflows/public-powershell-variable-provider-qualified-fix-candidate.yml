@@ -1,0 +1,133 @@
+name: Public PowerShell Variable Provider Qualified Fix Candidate
+
+on:
+  push:
+    branches:
+      - diagnostics/public-standard-hosted-runner-canary-20260822
+    paths:
+      - '.github/workflows/public-powershell-variable-provider-qualified-fix-candidate.yml'
+      - 'diagnostics/powershell-variable-provider-qualified-fix-candidate/**'
+      - '!diagnostics/powershell-variable-provider-qualified-fix-candidate/native-tested/**'
+      - 'diagnostics/powershell-automatic-variable-guard/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/public-powershell-variable-provider-qualified-fix-candidate.yml'
+      - 'diagnostics/powershell-variable-provider-qualified-fix-candidate/**'
+      - '!diagnostics/powershell-variable-provider-qualified-fix-candidate/native-tested/**'
+      - 'diagnostics/powershell-automatic-variable-guard/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-2022:
+    name: windows-2022 provider-qualified fix candidate
+    runs-on: windows-2022
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "PROVIDER_QUALIFIED_FIX_HEAD_MISMATCH expected=$env:EXPECTED_SHA actual=$actual" }
+      - name: Build candidate in workspace
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-provider-qualified-fix-candidate\Apply-ProviderQualifiedGuardFix.ps1 `
+            -InputPath .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1 `
+            -OutputPath .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1
+      - name: Validate candidate on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\diagnostics\powershell-variable-provider-qualified-fix-candidate\Test-ProviderQualifiedGuardFixCandidate.ps1 -LintScript .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1
+          .\diagnostics\powershell-automatic-variable-guard\Test-PowerShell-AutomaticVariableGuard.ps1
+      - name: Validate candidate on PowerShell 7
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-provider-qualified-fix-candidate\Test-ProviderQualifiedGuardFixCandidate.ps1 -LintScript .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1
+          .\diagnostics\powershell-automatic-variable-guard\Test-PowerShell-AutomaticVariableGuard.ps1
+
+  windows-latest:
+    name: windows-latest provider-qualified fix candidate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "PROVIDER_QUALIFIED_FIX_HEAD_MISMATCH expected=$env:EXPECTED_SHA actual=$actual" }
+      - name: Build candidate in workspace
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-provider-qualified-fix-candidate\Apply-ProviderQualifiedGuardFix.ps1 `
+            -InputPath .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1 `
+            -OutputPath .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1
+      - name: Validate candidate on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\diagnostics\powershell-variable-provider-qualified-fix-candidate\Test-ProviderQualifiedGuardFixCandidate.ps1 -LintScript .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1
+          .\diagnostics\powershell-automatic-variable-guard\Test-PowerShell-AutomaticVariableGuard.ps1
+      - name: Validate candidate on PowerShell 7
+        shell: pwsh
+        run: |
+          .\diagnostics\powershell-variable-provider-qualified-fix-candidate\Test-ProviderQualifiedGuardFixCandidate.ps1 -LintScript .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1
+          .\diagnostics\powershell-automatic-variable-guard\Test-PowerShell-AutomaticVariableGuard.ps1
+      - name: Emit candidate receipt
+        shell: pwsh
+        run: |
+          $path = (Resolve-Path .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1).Path
+          $receipt = [ordered]@{
+            component = 'public-powershell-variable-provider-qualified-fix-candidate-artifact'
+            schemaVersion = 1
+            headSha = '${{ github.event.pull_request.head.sha || github.sha }}'
+            sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            byteLength = (Get-Item -LiteralPath $path).Length
+            windowsPowerShell51Accepted = $true
+            powerShell7Accepted = $true
+            privateCanonicalConvergenceAccepted = $false
+          }
+          $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath .\diagnostics\powershell-variable-provider-qualified-fix-candidate\candidate-receipt.json -Encoding UTF8
+      - name: Upload native-tested candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: provider-qualified-guard-fix-candidate-${{ github.run_id }}
+          path: |
+            diagnostics/powershell-automatic-variable-guard/Test-Scripts.ps1
+            diagnostics/powershell-variable-provider-qualified-fix-candidate/candidate-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish native-tested candidate snapshot
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_HEAD: ${{ github.sha }}
+        run: |
+          $candidate = (Resolve-Path .\diagnostics\powershell-automatic-variable-guard\Test-Scripts.ps1).Path
+          $bytes = [System.IO.File]::ReadAllBytes($candidate)
+          $content = [Convert]::ToBase64String($bytes)
+          $snapshotPath = "diagnostics/powershell-variable-provider-qualified-fix-candidate/native-tested/$env:SOURCE_HEAD/Test-Scripts.ps1"
+          $endpoint = "repos/$env:GITHUB_REPOSITORY/contents/$snapshotPath"
+          $body = [ordered]@{
+            message = "diagnostics: publish native-tested provider guard snapshot [skip ci]"
+            content = $content
+            branch = $env:GITHUB_REF_NAME
+          } | ConvertTo-Json -Compress
+          $body | gh api --method PUT $endpoint --input - | Out-Null
+          Write-Host "NATIVE_TESTED_PROVIDER_GUARD_SNAPSHOT=$snapshotPath"

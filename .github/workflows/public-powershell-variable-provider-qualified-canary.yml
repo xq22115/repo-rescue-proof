@@ -1,0 +1,66 @@
+name: Public PowerShell Variable Provider Qualified Path Canary
+
+on:
+  push:
+    branches:
+      - diagnostics/public-standard-hosted-runner-canary-20260822
+    paths:
+      - '.github/workflows/public-powershell-variable-provider-qualified-canary.yml'
+      - 'diagnostics/powershell-variable-provider-qualified-canary/Test-PowerShell-VariableProviderQualifiedPathCanary.ps1'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/public-powershell-variable-provider-qualified-canary.yml'
+      - 'diagnostics/powershell-variable-provider-qualified-canary/Test-PowerShell-VariableProviderQualifiedPathCanary.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-2022:
+    name: windows-2022 provider-qualified path canary
+    runs-on: windows-2022
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "PROVIDER_QUALIFIED_CANARY_HEAD_MISMATCH expected=$env:EXPECTED_SHA actual=$actual" }
+      - name: Run provider-qualified canary on Windows PowerShell 5.1
+        shell: powershell
+        run: .\diagnostics\powershell-variable-provider-qualified-canary\Test-PowerShell-VariableProviderQualifiedPathCanary.ps1
+      - name: Run provider-qualified canary on PowerShell 7
+        shell: pwsh
+        run: .\diagnostics\powershell-variable-provider-qualified-canary\Test-PowerShell-VariableProviderQualifiedPathCanary.ps1
+
+  windows-latest:
+    name: windows-latest provider-qualified path canary
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact diagnostic revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "PROVIDER_QUALIFIED_CANARY_HEAD_MISMATCH expected=$env:EXPECTED_SHA actual=$actual" }
+      - name: Run provider-qualified canary on Windows PowerShell 5.1
+        shell: powershell
+        run: .\diagnostics\powershell-variable-provider-qualified-canary\Test-PowerShell-VariableProviderQualifiedPathCanary.ps1
+      - name: Run provider-qualified canary on PowerShell 7
+        shell: pwsh
+        run: .\diagnostics\powershell-variable-provider-qualified-canary\Test-PowerShell-VariableProviderQualifiedPathCanary.ps1
