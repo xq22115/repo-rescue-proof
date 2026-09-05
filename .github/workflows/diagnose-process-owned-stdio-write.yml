@@ -1,0 +1,154 @@
+name: Diagnose Windows Process-Owned Stdio Write
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnose-process-owned-stdio-write.yml'
+      - 'diagnostics/process-owned/**'
+  push:
+    branches:
+      - 'diagnostic/process-owned-stdio-write-20260826'
+    paths:
+      - '.github/workflows/diagnose-process-owned-stdio-write.yml'
+      - 'diagnostics/process-owned/**'
+
+permissions:
+  contents: read
+
+jobs:
+  ps51:
+    name: ${{ matrix.os }} / Windows PowerShell 5.1
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision and private Git blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "4d7515669e68b4ae6a44413a04d2d3284921b934"
+          test "$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+          test "$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
+          test "$(git hash-object diagnostics/process-owned/Read-Windows-Mcp-ProcessOwnedStdioResponseArtifact.ps1)" = "1800e2f6e8fe77053a398075e5eed0b2763ca95a"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "ac053e064a187305e5fbb5b49ccf95cd7d211161"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
+      - name: Exercise exact private sender policy boundary
+        shell: powershell
+        timeout-minutes: 1
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\result.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+      - name: Exercise exact private response-capture policy boundary
+        shell: powershell
+        timeout-minutes: 1
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\response-result.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioResponseCaptureCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+      - name: Exercise exact private single-flight transport-host boundary
+        shell: powershell
+        timeout-minutes: 1
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\single-flight.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightLeaseCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-owned-stdio-write-${{ matrix.os }}-ps51
+          path: ${{ runner.temp }}/process-owned-stdio-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'Windows PowerShell 5.1 is expected to receive fast MCP_STDIO_TRANSPORT_HOST_UNSUPPORTED VETOs for exact-byte request writes, process-owned response capture, and the exact private runtime single-flight exchange; full stdio transport execution is owned by PowerShell Core 7+.' >> "$GITHUB_STEP_SUMMARY"
+
+  ps7:
+    name: ${{ matrix.os }} / PowerShell 7
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision and private Git blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-ProcessOwnedNearWireStdioFrameWriteAttempt.ps1)" = "4d7515669e68b4ae6a44413a04d2d3284921b934"
+          test "$(git hash-object diagnostics/process-owned/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+          test "$(git hash-object diagnostics/process-owned/ConvertTo-BraintrustCanonicalJson.ps1)" = "0ed3d31e1bc13c20b5e4924b182ff77215f05893"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-NearWireBoundStdioFrameWriteAttempt.ps1)" = "e148dec284f5c9fd280c605f9ec9b095050d5fff"
+          test "$(git hash-object diagnostics/process-owned/Invoke-Windows-Mcp-MultiServerStdioFrameWriteAttempt.ps1)" = "2909c16aed847c22693bfe094de3ff076003013b"
+          test "$(git hash-object diagnostics/process-owned/Read-Windows-Mcp-ProcessOwnedStdioResponseArtifact.ps1)" = "1800e2f6e8fe77053a398075e5eed0b2763ca95a"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Invoke-Windows-Mcp-ProcessOwnedStdioSingleFlightExchange.ps1)" = "ac053e064a187305e5fbb5b49ccf95cd7d211161"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-BraintrustStrictJsonScalar.ps1)" = "4bc29ae306b613aafcc37c4bc63e54e321a38eb2"
+          test "$(git hash-object diagnostics/process-owned/single-flight/Get-Windows-Mcp-StdioSingleFlightLeaseRecoveryEvidence.ps1)" = "a504cb7374710171d46e7880bf36835059cdd892"
+      - name: Exercise exact private sender chain
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\result.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioWriteCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Exercise exact private response-capture chain
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\response-result.json'
+          .\diagnostics\process-owned\Invoke-ProcessOwnedStdioResponseCaptureCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Exercise exact private runtime single-flight lease
+        shell: pwsh
+        timeout-minutes: 4
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\single-flight.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightLeaseCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Exercise abrupt session-process termination and retained-lease recovery classification
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'process-owned-stdio-evidence\single-flight-abrupt-termination.json'
+          .\diagnostics\process-owned\Invoke-StdioSingleFlightAbruptTerminationCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-owned-stdio-write-${{ matrix.os }}-ps7
+          path: ${{ runner.temp }}/process-owned-stdio-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Exercises exact private bytes for the process-owned request wrapper, strict JSON helper, canonical JSON helper, near-wire sender, lower-level stdio sender, process-owned response-capture primitive, exact current private runtime single-flight exchange (which requests FileStream.Flush(true) before effectuation), and exact private retained-lease recovery classifier.
+          The request diagnostic child reads the exact planned frame and a same-executable sibling process must be rejected before the sender chain.
+          The response diagnostic child emits one raw UTF-8 LF-delimited JSON-RPC response; the exact private response-capture primitive must read it only through the bound Process.StandardOutput.BaseStream, bind the response id to the frame-plan request id, and reject a same-executable sibling before reading.
+          The single-flight canary isolates lease semantics with diagnostic write/response stubs: two sequential calls must reacquire after successful release; an overlapping same-session caller must be rejected while the winner holds the lease; an injected post-acquisition failure must retain the lease and block same-session retry until explicit diagnostic cleanup.
+          The abrupt-termination canary then externally terminates a PowerShell 7 process after the exact private single-flight exchange has created and flush-to-disk-requested its session lease. The exact private recovery classifier must first classify the live lease as live-session-busy, then classify the unchanged retained lease after termination as abandoned-session-process-missing, require a fresh session/manual recovery, and never delete the lease or authorize retry/replay.
+          This does not prove abrupt OS crash or power-loss durability, exactly-once tool side effects, a live production tools/list refresh, wire-time atomic generation freshness, production MCP server delivery, kernel pipe-peer identity, cryptographic response origin, physical server identity, authorization, semantic tool success, or final Windows state.
+          EOF

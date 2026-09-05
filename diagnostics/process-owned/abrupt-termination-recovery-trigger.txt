@@ -1,0 +1,2 @@
+Triggers the native abrupt single-flight lease recovery matrix after workflow convergence.
+Retry requested 2026-08-26T15:22Z after a zero-step hosted-runner failure; no diagnostic semantics changed.
