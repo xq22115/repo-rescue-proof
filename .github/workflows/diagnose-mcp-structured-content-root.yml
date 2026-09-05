@@ -1,0 +1,72 @@
+name: Diagnose MCP Structured Content Roots
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnose-mcp-structured-content-root.yml'
+      - 'diagnostics/structured-content/**'
+  push:
+    branches:
+      - 'diagnostic/mcp-structured-content-root-20260826'
+    paths:
+      - '.github/workflows/diagnose-mcp-structured-content-root.yml'
+      - 'diagnostics/structured-content/**'
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.os }} / MCP structuredContent root schema
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Read back exact revision
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - name: Windows PowerShell 5.1 policy boundary
+        shell: powershell
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'mcp-structured-content-root\ps51.json'
+          .\diagnostics\structured-content\Test-McpStructuredContentRootSchemaCanary.ps1 -ShellLabel 'Windows PowerShell 5.1' -OutputPath $out
+          $r=Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
+          if (-not $r.acceptanceBoundary.windowsPowerShell51RejectedAsAcceptedSchemaValidator) { throw 'PS5.1 schema-validation policy boundary was not preserved.' }
+          if ($r.acceptanceBoundary.arbitraryJsonRootSchemaBehaviorExercised) { throw 'PS5.1 must not be promoted to accepted MCP output-schema authority.' }
+      - name: PowerShell 7 JSON Schema root matrix
+        shell: pwsh
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'mcp-structured-content-root\ps7.json'
+          .\diagnostics\structured-content\Test-McpStructuredContentRootSchemaCanary.ps1 -ShellLabel 'PowerShell 7' -OutputPath $out
+          $r=Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
+          if (-not $r.acceptanceBoundary.mcpStructuredContentAnyJsonValueAccepted) { throw 'PowerShell 7 arbitrary JSON root schema contract was not accepted.' }
+          if (@($r.cases).Count -ne 6) { throw 'Expected six structuredContent root cases.' }
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-structured-content-root-${{ matrix.os }}
+          path: ${{ runner.temp }}/mcp-structured-content-root/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Exercises Windows-native JSON Schema behavior for MCP 2026-07-28 structuredContent roots: object, array, string, number, boolean, and null.
+          Windows PowerShell 5.1 is intentionally not accepted as production response-schema authority; accepted validation remains PowerShell Core 7.4+.
+          This canary validates the underlying Test-Json root-type behavior only. It does not prove request-start generation binding, process-owned response provenance, semantic correctness, authorization, or final Windows state.
+          EOF
