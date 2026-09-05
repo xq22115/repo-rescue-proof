@@ -1,0 +1,42 @@
+name: Main Install Receipt UTF8 NoBOM Canary
+
+on:
+  push:
+    branches:
+      - diag-main-install-receipt-utf8-nobom-20260825
+  pull_request:
+    paths:
+      - 'scripts/main-install-receipt-utf8-nobom-canary.ps1'
+      - '.github/workflows/main-install-receipt-utf8-nobom-canary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: ${{ matrix.os }} receipt bytes
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    steps:
+      - name: Checkout diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Windows PowerShell 5.1 receipt bytes
+        shell: powershell
+        run: '& ./scripts/main-install-receipt-utf8-nobom-canary.ps1'
+
+      - name: PowerShell 7 receipt bytes
+        shell: pwsh
+        run: '& ./scripts/main-install-receipt-utf8-nobom-canary.ps1'
+
+      - name: State diagnostic boundary
+        shell: pwsh
+        run: |
+          @'
+          Main-install receipt encoding canary only.
+          No private Braintrust receipts, secrets, ODR runtime data, or MCP production state are used.
+          PASS proves only the observed byte behavior of Set-Content -Encoding UTF8 versus explicit UTF8Encoding(false)+WriteAllText on this Windows image and PowerShell edition.
+          '@ | Write-Host
