@@ -1,0 +1,100 @@
+name: Diagnose PowerShell MCP Transport Broker Installer
+
+on:
+  push:
+    branches:
+      - diagnostic/pwsh-transport-broker-20260825
+  pull_request:
+    paths:
+      - 'diagnostics/Install-Windows-Mcp-PowerShellTransportBroker.ps1'
+      - 'diagnostics/installer-lock.json'
+      - '.github/workflows/diagnose-pwsh-transport-broker-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-install:
+    name: ${{ matrix.image }} / Windows PowerShell 5.1 bootstrap
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - windows-2022
+          - windows-latest
+    steps:
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact diagnostic revision and source identity
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -ne $env:EXPECTED_HEAD_SHA) { throw "Checkout head mismatch. expected=$env:EXPECTED_HEAD_SHA actual=$head" }
+          $helperBlob = (git hash-object diagnostics/Install-Windows-Mcp-PowerShellTransportBroker.ps1).Trim()
+          $lockBlob = (git hash-object diagnostics/installer-lock.json).Trim()
+          Write-Host "DIAGNOSTIC_HEAD=$head"
+          Write-Host "BROKER_INSTALLER_GIT_BLOB=$helperBlob"
+          Write-Host "BROKER_LOCK_GIT_BLOB=$lockBlob"
+
+      - name: Install pinned broker from Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          if ([string]$PSVersionTable.PSEdition -ne 'Desktop') { throw "Expected Windows PowerShell Desktop bootstrap; actual=$($PSVersionTable.PSEdition)" }
+          $installBase = Join-Path $env:RUNNER_TEMP ('pwsh-broker-' + [guid]::NewGuid().ToString('N'))
+          $receiptPath = Join-Path $env:RUNNER_TEMP ('pwsh-broker-receipt-' + [guid]::NewGuid().ToString('N') + '.json')
+          $result = & .\diagnostics\Install-Windows-Mcp-PowerShellTransportBroker.ps1 -LockPath .\diagnostics\installer-lock.json -InstallBase $installBase -ReceiptPath $receiptPath
+          if (-not [bool]$result.brokerInstallAccepted) { throw 'Broker installer did not accept the installed runtime.' }
+          if ([bool]$result.productionOdrBrokerIntegrationAccepted) { throw 'Diagnostic installer must not claim production ODR integration.' }
+          if ([bool]$result.nativeInstallerExecutionAccepted) { throw 'Candidate installer receipt must keep nativeInstallerExecutionAccepted=false by design.' }
+          $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ([int]$receipt.schemaVersion -ne 1) { throw 'Unexpected broker receipt schema.' }
+          if ([string]$receipt.installedBroker.powershellEdition -ne 'Core') { throw 'Installed broker is not PowerShell Core.' }
+          if ([string]$receipt.installedBroker.powershellVersion -ne '7.6.5') { throw "Installed broker version mismatch: $($receipt.installedBroker.powershellVersion)" }
+          if (-not [bool]$receipt.installedBroker.standardInputEncodingPropertyObserved) { throw 'Installed broker lacks StandardInputEncoding.' }
+          if ([string]$receipt.installedBroker.authenticodeStatus -ne 'Valid') { throw 'Installed broker Authenticode status was not Valid.' }
+          if ([bool]$receipt.acceptanceBoundary.pathMutationPerformed) { throw 'Broker installer unexpectedly mutated PATH.' }
+          if ([bool]$receipt.acceptanceBoundary.automaticUpdateEnabledByInstaller) { throw 'Broker installer unexpectedly enabled automatic update.' }
+          $pwshPath = [IO.Path]::GetFullPath([string]$receipt.installedBroker.executablePath)
+          if (-not $pwshPath.StartsWith(([IO.Path]::GetFullPath($installBase).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Installed pwsh.exe escaped the diagnostic install root.' }
+          $observedSha = (Get-FileHash -LiteralPath $pwshPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($observedSha -ne [string]$receipt.installedBroker.executableSha256) { throw 'Installed pwsh.exe SHA read-back drifted.' }
+          $probeScriptPath = Join-Path $env:RUNNER_TEMP ('installed-pwsh-probe-' + [guid]::NewGuid().ToString('N') + '.ps1')
+          @'
+          [ordered]@{
+            edition = [string]$PSVersionTable.PSEdition
+            version = [string]$PSVersionTable.PSVersion
+            hasStandardInputEncoding = ([System.Diagnostics.ProcessStartInfo].GetProperty('StandardInputEncoding') -ne $null)
+          } | ConvertTo-Json -Compress
+          '@ | Set-Content -LiteralPath $probeScriptPath -Encoding UTF8
+          $probeJson = (& $pwshPath -NoLogo -NoProfile -NonInteractive -File $probeScriptPath | Out-String).Trim()
+          $probe = $probeJson | ConvertFrom-Json
+          if ([string]$probe.edition -ne 'Core' -or [string]$probe.version -ne '7.6.5' -or -not [bool]$probe.hasStandardInputEncoding) {
+            throw "Installed broker re-probe failed: $probeJson"
+          }
+          Write-Host 'PWSH_BROKER_NATIVE_INSTALL=PASS'
+          Write-Host "BOOTSTRAP_POWERSHELL=$($PSVersionTable.PSVersion)"
+          Write-Host "INSTALLED_PWSH=$pwshPath"
+          Write-Host "INSTALLED_PWSH_SHA256=$observedSha"
+          Write-Host "RECEIPT_PATH=$receiptPath"
+
+      - name: State acceptance boundary
+        shell: pwsh
+        run: |
+          @'
+          ## PowerShell MCP transport broker diagnostic
+
+          - This public diagnostic installs the pinned PowerShell 7.6.5 x64 ZIP from the official PowerShell GitHub release into a disposable per-runner directory.
+          - It validates official release digest metadata, the official checksum manifest, archive SHA-256, Authenticode observation, exact runtime version, and the modern StandardInputEncoding API.
+          - It intentionally does not claim the private Braintrust one-click installer consumes this helper, that private ODR uses this broker receipt, ARM64 native acceptance, MCP semantics, or final Windows state.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

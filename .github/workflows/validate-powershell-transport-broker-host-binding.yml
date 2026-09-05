@@ -1,0 +1,69 @@
+name: Validate PowerShell Transport Broker Host Binding
+
+on:
+  pull_request:
+    paths:
+      - 'diagnostics/Get-Windows-Mcp-PowerShellTransportBrokerHostEvidence.ps1'
+      - 'diagnostics/test-powershell-transport-broker-host-binding.ps1'
+      - '.github/workflows/validate-powershell-transport-broker-host-binding.yml'
+  push:
+    branches:
+      - diagnostic/pwsh-transport-broker-20260825
+    paths:
+      - 'diagnostics/Get-Windows-Mcp-PowerShellTransportBrokerHostEvidence.ps1'
+      - 'diagnostics/test-powershell-transport-broker-host-binding.ps1'
+      - '.github/workflows/validate-powershell-transport-broker-host-binding.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-host-binding:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Read back exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_HEAD_SHA) { throw "HEAD mismatch: $actual != $env:EXPECTED_HEAD_SHA" }
+
+      - name: Run receipt-bound broker host canary
+        shell: pwsh
+        run: |
+          $evidenceDir = Join-Path $env:RUNNER_TEMP 'broker-host-binding-evidence'
+          New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
+          $safeOs = '${{ matrix.os }}'.Replace('-', '_')
+          $evidencePath = Join-Path $evidenceDir ("evidence-$safeOs.json")
+          ./diagnostics/test-powershell-transport-broker-host-binding.ps1 `
+            -HelperPath ./diagnostics/Get-Windows-Mcp-PowerShellTransportBrokerHostEvidence.ps1 `
+            -EvidencePath $evidencePath
+          Get-Content -LiteralPath $evidencePath -Raw | Write-Host
+
+      - name: Upload native host-binding evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: powershell-broker-host-binding-${{ matrix.os }}
+          path: ${{ runner.temp }}/broker-host-binding-evidence/*.json
+          if-no-files-found: error
+
+      - name: Acceptance boundary
+        shell: pwsh
+        run: |
+          @'
+          PUBLIC_NATIVE_HOST_BINDING_PRIMITIVE_ACCEPTED=true
+          PRIVATE_BRAINTRUST_INSTALL_RECEIPT_USED=false
+          PRODUCTION_ODR_CONSUMER_ACCEPTED=false
+          MCP_PROTOCOL_RUNTIME_ACCEPTED=false
+          WINDOWS_FINAL_STATE_ACCEPTED=false
+          '@ | Write-Host
