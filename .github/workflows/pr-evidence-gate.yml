@@ -11,9 +11,12 @@ jobs:
   evidence-gate:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate required evidence sections
+      - name: Validate required execution evidence
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         run: |
           python - <<'PY'
           import os
@@ -21,6 +24,10 @@ jobs:
           import sys
 
           body = os.environ.get("PR_BODY") or ""
+          head_sha = (os.environ.get("PR_HEAD_SHA") or "").strip()
+          commits = int(os.environ.get("PR_COMMITS") or "0")
+          changed_files = int(os.environ.get("PR_CHANGED_FILES") or "0")
+
           required = [
               "Root goal",
               "Source of truth",
@@ -52,12 +59,42 @@ jobs:
               else:
                   sections[heading] = content
 
-          for heading in ("Read-back evidence", "Tests", "Cross-checks"):
-              content = sections.get(heading, "")
-              if not re.search(r"\bPASS\b", content, flags=re.I):
-                  errors.append(f"{heading} must contain PASS evidence")
-              if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", content, flags=re.I):
-                  errors.append(f"{heading} still contains a non-passing status")
+          if commits < 1 or changed_files < 1:
+              errors.append(
+                  "no observable GitHub mutation: PR must contain at least one commit and one changed file"
+              )
+
+          source = sections.get("Source of truth", "")
+          if source and not re.search(r"(`[^`]+`|#\d+|https://github\.com/|\b[0-9a-f]{7,40}\b)", source, flags=re.I):
+              errors.append("Source of truth must include at least one concrete file/issue/URL/revision reference")
+
+          executed = sections.get("Executed actions", "")
+          if executed and not re.search(r"\b(created|added|updated|changed|removed|committed|branch|commit|file|workflow|issue|PR)\b", executed, flags=re.I):
+              errors.append("Executed actions must describe an observable GitHub mutation")
+
+          read_back = sections.get("Read-back evidence", "")
+          if not re.search(r"\bPASS\b", read_back, flags=re.I):
+              errors.append("Read-back evidence must contain PASS")
+          if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", read_back, flags=re.I):
+              errors.append("Read-back evidence still contains a non-passing status")
+          if head_sha and head_sha not in read_back and head_sha[:12] not in read_back:
+              errors.append("Read-back evidence must cite the current PR head SHA")
+
+          tests = sections.get("Tests", "")
+          if not re.search(r"\bPASS\b", tests, flags=re.I):
+              errors.append("Tests must contain PASS evidence")
+          if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", tests, flags=re.I):
+              errors.append("Tests still contains a non-passing status")
+          if tests and not re.search(r"(actions/runs/\d+|\brun\s*(?:#|id[:=]?)?\s*\d+|`[^`]+`)", tests, flags=re.I):
+              errors.append("Tests must cite a workflow run/id or executed command")
+
+          cross_checks = sections.get("Cross-checks", "")
+          if not re.search(r"\bPASS\b", cross_checks, flags=re.I):
+              errors.append("Cross-checks must contain PASS evidence")
+          if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", cross_checks, flags=re.I):
+              errors.append("Cross-checks still contains a non-passing status")
+          if cross_checks and not re.search(r"\b(independent|review|reviewer|verifier|CodeRabbit|evidence checker)\b", cross_checks, flags=re.I):
+              errors.append("Cross-checks must identify an independent reviewer or verifier")
 
           remaining = sections.get("Remaining gaps", "")
           if remaining and not re.fullmatch(r"(?is)none\.?", remaining.strip()):
@@ -73,5 +110,8 @@ jobs:
                   print(f"- {error}")
               sys.exit(1)
 
-          print("PR evidence gate passed.")
+          print(
+              f"PR evidence gate passed for head {head_sha}: "
+              f"{commits} commit(s), {changed_files} changed file(s)."
+          )
           PY
