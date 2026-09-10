@@ -1,0 +1,3 @@
+purpose=PR action-family smoke test
+actor=xq22115-pixel
+branch=chatgpt-github-smoke-20260910-1550
