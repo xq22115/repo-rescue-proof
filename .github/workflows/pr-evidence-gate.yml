@@ -1,0 +1,280 @@
+name: PR evidence gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  evidence-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate GitHub-backed execution evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          body = os.environ.get("PR_BODY") or ""
+          token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+          api_url = (os.environ.get("GITHUB_API_URL") or "https://api.github.com").rstrip("/")
+          repository = (os.environ.get("GITHUB_REPOSITORY") or "").strip()
+          pr_number = int(os.environ.get("PR_NUMBER") or "0")
+          pr_author = (os.environ.get("PR_AUTHOR") or "").strip()
+          head_sha = (os.environ.get("PR_HEAD_SHA") or "").strip()
+          base_sha = (os.environ.get("PR_BASE_SHA") or "").strip()
+          commits = int(os.environ.get("PR_COMMITS") or "0")
+          changed_files = int(os.environ.get("PR_CHANGED_FILES") or "0")
+
+          required = [
+              "Root goal",
+              "Source of truth",
+              "Executed actions",
+              "Read-back evidence",
+              "Tests",
+              "Cross-checks",
+              "Remaining gaps",
+              "Final status",
+          ]
+
+          def heading_section(text, heading):
+              pattern = re.compile(
+                  rf"(?ims)^##\s+{re.escape(heading)}\s*$\n(.*?)(?=^##\s+|\Z)"
+              )
+              match = pattern.search(text or "")
+              if not match:
+                  return None
+              return re.sub(r"<!--.*?-->", "", match.group(1), flags=re.S).strip()
+
+          def normalize(text):
+              return re.sub(r"\s+", " ", text or "").strip()
+
+          def api_get(path):
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "repo-rescue-proof-evidence-gate",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as exc:
+                  raise ValueError(f"GitHub API returned {exc.code} for {path}") from exc
+              except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                  raise ValueError(f"GitHub API request failed for {path}: {exc}") from exc
+
+          def marker_values(text, key):
+              return [
+                  match.group(1).strip().strip("`")
+                  for match in re.finditer(rf"(?im)^{re.escape(key)}:\s*(.+?)\s*$", text or "")
+              ]
+
+          def single_marker(text, key):
+              values = marker_values(text, key)
+              if len(values) != 1:
+                  raise ValueError(f"{key} must appear exactly once")
+              return values[0]
+
+          def pr_files():
+              files = []
+              page = 1
+              while True:
+                  batch = api_get(
+                      f"/repos/{repository}/pulls/{pr_number}/files?per_page=100&page={page}"
+                  )
+                  if not isinstance(batch, list):
+                      raise ValueError("GitHub PR files response was not a list")
+                  files.extend(batch)
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              return files
+
+          errors = []
+          sections = {}
+          for heading in required:
+              content = heading_section(body, heading)
+              if content is None:
+                  errors.append(f"missing section: ## {heading}")
+              elif not content:
+                  errors.append(f"empty section: ## {heading}")
+              else:
+                  sections[heading] = content
+
+          if not repository or not pr_number or not head_sha or not base_sha:
+              errors.append("missing GitHub pull-request identity from event payload")
+          if commits < 1 or changed_files < 1:
+              errors.append(
+                  "no observable GitHub mutation: PR must contain at least one commit and one changed file"
+              )
+
+          root_goal = sections.get("Root goal", "")
+          source = sections.get("Source of truth", "")
+          source_paths = marker_values(source, "SOURCE_PATH")
+          source_issues = marker_values(source, "SOURCE_ISSUE")
+          if not source_paths:
+              errors.append("Source of truth must include at least one SOURCE_PATH marker")
+          for path in source_paths:
+              encoded = urllib.parse.quote(path, safe="/")
+              ref = urllib.parse.quote(base_sha, safe="")
+              try:
+                  api_get(f"/repos/{repository}/contents/{encoded}?ref={ref}")
+              except ValueError as exc:
+                  errors.append(f"SOURCE_PATH is not verifiable on base {base_sha[:12]}: {path} ({exc})")
+
+          if len(source_issues) != 1:
+              errors.append("Source of truth must include exactly one SOURCE_ISSUE acceptance source")
+          else:
+              issue_value = source_issues[0]
+              try:
+                  issue_number = int(issue_value.lstrip("#"))
+                  issue = api_get(f"/repos/{repository}/issues/{issue_number}")
+                  if int(issue.get("number") or 0) != issue_number:
+                      raise ValueError("issue number mismatch")
+                  issue_body = issue.get("body") or ""
+                  issue_root_goal = heading_section(issue_body, "Root goal")
+                  issue_acceptance = heading_section(issue_body, "Acceptance criteria")
+                  if not issue_root_goal:
+                      errors.append("SOURCE_ISSUE is missing a ## Root goal section")
+                  elif normalize(issue_root_goal) != normalize(root_goal):
+                      errors.append("PR Root goal does not exactly preserve SOURCE_ISSUE Root goal")
+                  if not issue_acceptance:
+                      errors.append("SOURCE_ISSUE is missing a ## Acceptance criteria section")
+              except (ValueError, TypeError) as exc:
+                  errors.append(f"SOURCE_ISSUE is not verifiable: {issue_value} ({exc})")
+
+          executed = sections.get("Executed actions", "")
+          if executed and not re.search(
+              r"\b(created|added|updated|changed|removed|committed|branch|commit|file|workflow|issue|PR)\b",
+              executed,
+              flags=re.I,
+          ):
+              errors.append("Executed actions must describe an observable GitHub mutation")
+
+          current_files = []
+          if repository and pr_number:
+              try:
+                  current_files = pr_files()
+                  if len(current_files) != changed_files:
+                      errors.append(
+                          f"PR changed-file count mismatch: event={changed_files}, API={len(current_files)}"
+                      )
+              except ValueError as exc:
+                  errors.append(f"unable to verify current PR file set: {exc}")
+
+          read_back = sections.get("Read-back evidence", "")
+          if not re.search(r"\bPASS\b", read_back, flags=re.I):
+              errors.append("Read-back evidence must contain PASS")
+          if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", read_back, flags=re.I):
+              errors.append("Read-back evidence still contains a non-passing status")
+          try:
+              declared_head = single_marker(read_back, "READBACK_HEAD_SHA")
+              if declared_head != head_sha:
+                  errors.append("READBACK_HEAD_SHA does not equal the current PR head SHA")
+          except ValueError as exc:
+              errors.append(str(exc))
+
+          declared_files = set(marker_values(read_back, "READBACK_FILE"))
+          expected_files = {
+              f"{item.get('filename')}@{item.get('sha')}"
+              for item in current_files
+              if item.get("filename") and item.get("sha")
+          }
+          if current_files and declared_files != expected_files:
+              missing = sorted(expected_files - declared_files)
+              extra = sorted(declared_files - expected_files)
+              if missing:
+                  errors.append("Read-back evidence missing current PR file blob(s): " + ", ".join(missing))
+              if extra:
+                  errors.append("Read-back evidence contains stale/unverified file blob(s): " + ", ".join(extra))
+
+          tests = sections.get("Tests", "")
+          if not re.search(r"\bPASS\b", tests, flags=re.I):
+              errors.append("Tests must contain PASS evidence")
+          if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", tests, flags=re.I):
+              errors.append("Tests still contains a non-passing status")
+          try:
+              test_run_id = int(single_marker(tests, "TEST_RUN_ID"))
+              run = api_get(f"/repos/{repository}/actions/runs/{test_run_id}")
+              if run.get("head_sha") != head_sha:
+                  errors.append("TEST_RUN_ID does not belong to the current PR head SHA")
+              if run.get("conclusion") != "success":
+                  errors.append("TEST_RUN_ID conclusion is not success")
+              if run.get("event") != "pull_request":
+                  errors.append("TEST_RUN_ID is not a pull_request run")
+              if run.get("name") != "test" or run.get("path") != ".github/workflows/test.yml":
+                  errors.append("TEST_RUN_ID is not exactly the repository test workflow")
+          except (ValueError, TypeError) as exc:
+              errors.append(f"TEST_RUN_ID is not verifiable: {exc}")
+
+          cross_checks = sections.get("Cross-checks", "")
+          if not re.search(r"\bPASS\b", cross_checks, flags=re.I):
+              errors.append("Cross-checks must contain PASS evidence")
+          if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", cross_checks, flags=re.I):
+              errors.append("Cross-checks still contains a non-passing status")
+          try:
+              review_comment_id = int(single_marker(cross_checks, "REVIEW_COMMENT_ID"))
+              comment = api_get(f"/repos/{repository}/issues/comments/{review_comment_id}")
+              reviewer = ((comment.get("user") or {}).get("login") or "").strip()
+              review_body = comment.get("body") or ""
+              comment_issue_url = comment.get("issue_url") or ""
+              if not reviewer or reviewer.lower() == pr_author.lower():
+                  errors.append("REVIEW_COMMENT_ID is not from an independent reviewer")
+              if not comment_issue_url.endswith(f"/issues/{pr_number}"):
+                  errors.append("REVIEW_COMMENT_ID does not belong to this pull request")
+              if len(review_body.strip()) < 80:
+                  errors.append("REVIEW_COMMENT_ID is too short to substantiate an independent review")
+              if "skip review" in review_body.lower() or "review in progress" in review_body.lower():
+                  errors.append("REVIEW_COMMENT_ID is not a completed review")
+              if head_sha not in review_body and head_sha[:12] not in review_body and head_sha[:7] not in review_body:
+                  errors.append("REVIEW_COMMENT_ID does not cover the current PR head SHA")
+              if not re.search(r"(?im)^REVIEW_VERDICT:\s*PASS\s*$", review_body):
+                  errors.append("REVIEW_COMMENT_ID does not contain an explicit REVIEW_VERDICT: PASS")
+          except (ValueError, TypeError) as exc:
+              errors.append(f"REVIEW_COMMENT_ID is not verifiable: {exc}")
+
+          remaining = sections.get("Remaining gaps", "")
+          if remaining and not re.fullmatch(r"(?is)none\.?", remaining.strip()):
+              errors.append("Remaining gaps must be exactly None before final acceptance")
+
+          final_status = sections.get("Final status", "")
+          if final_status and not re.fullmatch(r"(?is)PASS\.?", final_status.strip()):
+              errors.append("Final status must be exactly PASS")
+
+          if errors:
+              print("PR evidence gate failed:")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          print(
+              f"PR evidence gate passed for head {head_sha}: "
+              f"{commits} commit(s), {changed_files} GitHub-verified changed file(s), "
+              f"test run {test_run_id}, review comment {review_comment_id}."
+          )
+          PY
