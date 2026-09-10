@@ -58,14 +58,17 @@ jobs:
               "Final status",
           ]
 
-          def section(heading):
+          def heading_section(text, heading):
               pattern = re.compile(
                   rf"(?ims)^##\s+{re.escape(heading)}\s*$\n(.*?)(?=^##\s+|\Z)"
               )
-              match = pattern.search(body)
+              match = pattern.search(text or "")
               if not match:
                   return None
               return re.sub(r"<!--.*?-->", "", match.group(1), flags=re.S).strip()
+
+          def normalize(text):
+              return re.sub(r"\s+", " ", text or "").strip()
 
           def api_get(path):
               request = urllib.request.Request(
@@ -88,7 +91,7 @@ jobs:
           def marker_values(text, key):
               return [
                   match.group(1).strip().strip("`")
-                  for match in re.finditer(rf"(?im)^{re.escape(key)}:\s*(.+?)\s*$", text)
+                  for match in re.finditer(rf"(?im)^{re.escape(key)}:\s*(.+?)\s*$", text or "")
               ]
 
           def single_marker(text, key):
@@ -115,7 +118,7 @@ jobs:
           errors = []
           sections = {}
           for heading in required:
-              content = section(heading)
+              content = heading_section(body, heading)
               if content is None:
                   errors.append(f"missing section: ## {heading}")
               elif not content:
@@ -130,27 +133,40 @@ jobs:
                   "no observable GitHub mutation: PR must contain at least one commit and one changed file"
               )
 
+          root_goal = sections.get("Root goal", "")
           source = sections.get("Source of truth", "")
           source_paths = marker_values(source, "SOURCE_PATH")
           source_issues = marker_values(source, "SOURCE_ISSUE")
-          if not source_paths and not source_issues:
-              errors.append("Source of truth must include SOURCE_PATH and/or SOURCE_ISSUE markers")
+          if not source_paths:
+              errors.append("Source of truth must include at least one SOURCE_PATH marker")
+          for path in source_paths:
+              encoded = urllib.parse.quote(path, safe="/")
+              ref = urllib.parse.quote(base_sha, safe="")
+              try:
+                  api_get(f"/repos/{repository}/contents/{encoded}?ref={ref}")
+              except ValueError as exc:
+                  errors.append(f"SOURCE_PATH is not verifiable on base {base_sha[:12]}: {path} ({exc})")
+
+          if len(source_issues) != 1:
+              errors.append("Source of truth must include exactly one SOURCE_ISSUE acceptance source")
           else:
-              for path in source_paths:
-                  encoded = urllib.parse.quote(path, safe="/")
-                  ref = urllib.parse.quote(base_sha, safe="")
-                  try:
-                      api_get(f"/repos/{repository}/contents/{encoded}?ref={ref}")
-                  except ValueError as exc:
-                      errors.append(f"SOURCE_PATH is not verifiable on base {base_sha[:12]}: {path} ({exc})")
-              for issue_value in source_issues:
-                  try:
-                      issue_number = int(issue_value.lstrip("#"))
-                      issue = api_get(f"/repos/{repository}/issues/{issue_number}")
-                      if int(issue.get("number") or 0) != issue_number:
-                          raise ValueError("issue number mismatch")
-                  except (ValueError, TypeError) as exc:
-                      errors.append(f"SOURCE_ISSUE is not verifiable: {issue_value} ({exc})")
+              issue_value = source_issues[0]
+              try:
+                  issue_number = int(issue_value.lstrip("#"))
+                  issue = api_get(f"/repos/{repository}/issues/{issue_number}")
+                  if int(issue.get("number") or 0) != issue_number:
+                      raise ValueError("issue number mismatch")
+                  issue_body = issue.get("body") or ""
+                  issue_root_goal = heading_section(issue_body, "Root goal")
+                  issue_acceptance = heading_section(issue_body, "Acceptance criteria")
+                  if not issue_root_goal:
+                      errors.append("SOURCE_ISSUE is missing a ## Root goal section")
+                  elif normalize(issue_root_goal) != normalize(root_goal):
+                      errors.append("PR Root goal does not exactly preserve SOURCE_ISSUE Root goal")
+                  if not issue_acceptance:
+                      errors.append("SOURCE_ISSUE is missing a ## Acceptance criteria section")
+              except (ValueError, TypeError) as exc:
+                  errors.append(f"SOURCE_ISSUE is not verifiable: {issue_value} ({exc})")
 
           executed = sections.get("Executed actions", "")
           if executed and not re.search(
@@ -211,8 +227,8 @@ jobs:
                   errors.append("TEST_RUN_ID conclusion is not success")
               if run.get("event") != "pull_request":
                   errors.append("TEST_RUN_ID is not a pull_request run")
-              if run.get("name") != "test" and run.get("path") != ".github/workflows/test.yml":
-                  errors.append("TEST_RUN_ID is not the repository test workflow")
+              if run.get("name") != "test" or run.get("path") != ".github/workflows/test.yml":
+                  errors.append("TEST_RUN_ID is not exactly the repository test workflow")
           except (ValueError, TypeError) as exc:
               errors.append(f"TEST_RUN_ID is not verifiable: {exc}")
 
@@ -226,14 +242,19 @@ jobs:
               comment = api_get(f"/repos/{repository}/issues/comments/{review_comment_id}")
               reviewer = ((comment.get("user") or {}).get("login") or "").strip()
               review_body = comment.get("body") or ""
+              comment_issue_url = comment.get("issue_url") or ""
               if not reviewer or reviewer.lower() == pr_author.lower():
                   errors.append("REVIEW_COMMENT_ID is not from an independent reviewer")
+              if not comment_issue_url.endswith(f"/issues/{pr_number}"):
+                  errors.append("REVIEW_COMMENT_ID does not belong to this pull request")
               if len(review_body.strip()) < 80:
                   errors.append("REVIEW_COMMENT_ID is too short to substantiate an independent review")
               if "skip review" in review_body.lower() or "review in progress" in review_body.lower():
                   errors.append("REVIEW_COMMENT_ID is not a completed review")
               if head_sha not in review_body and head_sha[:12] not in review_body and head_sha[:7] not in review_body:
                   errors.append("REVIEW_COMMENT_ID does not cover the current PR head SHA")
+              if not re.search(r"(?im)^REVIEW_VERDICT:\s*PASS\s*$", review_body):
+                  errors.append("REVIEW_COMMENT_ID does not contain an explicit REVIEW_VERDICT: PASS")
           except (ValueError, TypeError) as exc:
               errors.append(f"REVIEW_COMMENT_ID is not verifiable: {exc}")
 
