@@ -1,5 +1,0 @@
-phase=update
-actor=xq22115-pixel
-connector=connector_76869538009648d5b282a4bb21c3d157
-create_commit=6efe68023c5918a584072302ea03c7a841e64298
-verification=readback-before-update
