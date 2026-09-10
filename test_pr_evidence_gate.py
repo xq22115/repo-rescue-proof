@@ -20,6 +20,10 @@ FILE_PATH = ".github/workflows/pr-evidence-gate.yml"
 FILE_SHA = "c" * 40
 TEST_RUN_ID = 123456
 REVIEW_COMMENT_ID = 987654
+ISSUE_ROOT_GOAL = (
+    "Make GitHub work evidence-first and closed-loop: source-of-truth → execution → "
+    "read-back → tests → cross-check → final status."
+)
 
 
 def extract_gate_script() -> str:
@@ -34,7 +38,7 @@ GATE_SCRIPT = extract_gate_script()
 
 def valid_body(head_sha: str = HEAD, file_sha: str = FILE_SHA) -> str:
     return f"""## Root goal
-Preserve the requested end state without narrowing scope.
+{ISSUE_ROOT_GOAL}
 
 ## Source of truth
 PASS — verified repository inputs before mutation.
@@ -65,23 +69,39 @@ PASS
 """
 
 
+def acceptance_issue_body(root_goal: str = ISSUE_ROOT_GOAL, *, include_acceptance: bool = True):
+    body = f"## Root goal\n{root_goal}\n\n## Hard gates\nDo not weaken the requested outcome.\n"
+    if include_acceptance:
+        body += "\n## Acceptance criteria\n1. Verify the evidence chain.\n"
+    return body
+
+
 def base_routes(
     *,
     head_sha: str = HEAD,
     file_sha: str = FILE_SHA,
     test_head_sha: str | None = None,
     test_conclusion: str = "success",
+    test_name: str = "test",
+    test_path: str = ".github/workflows/test.yml",
     reviewer: str = "coderabbitai[bot]",
     review_body: str | None = None,
+    review_issue_number: int = PR_NUMBER,
+    issue_body: str | None = None,
 ):
     test_head_sha = test_head_sha or head_sha
+    issue_body = issue_body if issue_body is not None else acceptance_issue_body()
     review_body = review_body or (
         f"Completed independent review for current head {head_sha}. "
-        "Checked correctness, CI behavior, evidence integrity, and acceptance criteria; no blocking issue remains."
+        "Checked correctness, CI behavior, evidence integrity, and acceptance criteria; no blocking issue remains.\n"
+        "REVIEW_VERDICT: PASS"
     )
     return {
         f"/repos/{REPO}/contents/README.md?ref={BASE}": (200, {"path": "README.md", "sha": "d" * 40}),
-        f"/repos/{REPO}/issues/14": (200, {"number": 14, "state": "open"}),
+        f"/repos/{REPO}/issues/14": (
+            200,
+            {"number": 14, "state": "open", "body": issue_body},
+        ),
         f"/repos/{REPO}/pulls/{PR_NUMBER}/files?per_page=100&page=1": (
             200,
             [{"filename": FILE_PATH, "sha": file_sha, "status": "modified"}],
@@ -93,14 +113,15 @@ def base_routes(
                 "head_sha": test_head_sha,
                 "conclusion": test_conclusion,
                 "event": "pull_request",
-                "name": "test",
-                "path": ".github/workflows/test.yml",
+                "name": test_name,
+                "path": test_path,
             },
         ),
         f"/repos/{REPO}/issues/comments/{REVIEW_COMMENT_ID}": (
             200,
             {
                 "id": REVIEW_COMMENT_ID,
+                "issue_url": f"https://api.github.com/repos/{REPO}/issues/{review_issue_number}",
                 "user": {"login": reviewer},
                 "body": review_body,
             },
@@ -205,6 +226,24 @@ class PrEvidenceGateTests(unittest.TestCase):
         output = self.assert_gate_fails(body)
         self.assertIn("SOURCE_ISSUE is not verifiable", output)
 
+    def test_multiple_acceptance_issues_fail(self):
+        body = self.body.replace("SOURCE_ISSUE: 14", "SOURCE_ISSUE: 14\nSOURCE_ISSUE: 15")
+        output = self.assert_gate_fails(body)
+        self.assertIn("exactly one SOURCE_ISSUE", output)
+
+    def test_narrowed_root_goal_fails(self):
+        body = self.body.replace(
+            ISSUE_ROOT_GOAL,
+            "Add a PR template and make CI green.",
+        )
+        output = self.assert_gate_fails(body)
+        self.assertIn("PR Root goal does not exactly preserve SOURCE_ISSUE Root goal", output)
+
+    def test_acceptance_issue_without_acceptance_criteria_fails(self):
+        routes = base_routes(issue_body=acceptance_issue_body(include_acceptance=False))
+        output = self.assert_gate_fails(routes=routes)
+        self.assertIn("SOURCE_ISSUE is missing a ## Acceptance criteria section", output)
+
     def test_stale_read_back_head_fails(self):
         body = self.body.replace(f"READBACK_HEAD_SHA: {HEAD}", f"READBACK_HEAD_SHA: {'e' * 40}")
         output = self.assert_gate_fails(body)
@@ -244,6 +283,11 @@ class PrEvidenceGateTests(unittest.TestCase):
         output = self.assert_gate_fails(routes=routes)
         self.assertIn("TEST_RUN_ID conclusion is not success", output)
 
+    def test_wrong_test_workflow_fails(self):
+        routes = base_routes(test_name="fake-test", test_path=".github/workflows/fake.yml")
+        output = self.assert_gate_fails(routes=routes)
+        self.assertIn("TEST_RUN_ID is not exactly the repository test workflow", output)
+
     def test_not_run_tests_fail_before_api_claim_can_pass(self):
         body = self.body.replace(
             "PASS — the GitHub-hosted repository test workflow succeeded on the current head.",
@@ -253,16 +297,21 @@ class PrEvidenceGateTests(unittest.TestCase):
         self.assertIn("Tests must contain PASS evidence", output)
         self.assertIn("Tests still contains a non-passing status", output)
 
-    def test_self_review_comment_fails(self):
+    def test_independent_self_review_phrase_by_pr_author_fails(self):
+        body = self.body.replace(
+            "PASS — an independent reviewer completed a current-head review.",
+            "PASS — independent self-review by the PR author; reviewer: PR author.",
+        )
         routes = base_routes(reviewer=PR_AUTHOR)
-        output = self.assert_gate_fails(routes=routes)
+        output = self.assert_gate_fails(body, routes=routes)
         self.assertIn("REVIEW_COMMENT_ID is not from an independent reviewer", output)
 
     def test_incomplete_review_comment_fails(self):
         routes = base_routes(
             review_body=(
                 f"Review in progress for current head {HEAD}. "
-                "This placeholder is intentionally long enough to ensure the completion-state check, not length, rejects it."
+                "This placeholder is intentionally long enough to ensure the completion-state check, not length, rejects it.\n"
+                "REVIEW_VERDICT: PASS"
             )
         )
         output = self.assert_gate_fails(routes=routes)
@@ -272,11 +321,38 @@ class PrEvidenceGateTests(unittest.TestCase):
         routes = base_routes(
             review_body=(
                 f"Completed independent review for old head {'8' * 40}. "
-                "Checked correctness, CI behavior, evidence integrity, and acceptance criteria with no blocker on that old revision."
+                "Checked correctness, CI behavior, evidence integrity, and acceptance criteria with no blocker on that old revision.\n"
+                "REVIEW_VERDICT: PASS"
             )
         )
         output = self.assert_gate_fails(routes=routes)
         self.assertIn("REVIEW_COMMENT_ID does not cover the current PR head SHA", output)
+
+    def test_review_comment_on_other_issue_fails(self):
+        routes = base_routes(review_issue_number=999)
+        output = self.assert_gate_fails(routes=routes)
+        self.assertIn("REVIEW_COMMENT_ID does not belong to this pull request", output)
+
+    def test_review_without_explicit_pass_verdict_fails(self):
+        routes = base_routes(
+            review_body=(
+                f"Completed independent review for current head {HEAD}. "
+                "Checked correctness, CI behavior, evidence integrity, and acceptance criteria; no blocker observed."
+            )
+        )
+        output = self.assert_gate_fails(routes=routes)
+        self.assertIn("explicit REVIEW_VERDICT: PASS", output)
+
+    def test_explicit_fail_review_verdict_fails(self):
+        routes = base_routes(
+            review_body=(
+                f"Completed independent review for current head {HEAD}. "
+                "A blocking acceptance problem remains and must be fixed before merge.\n"
+                "REVIEW_VERDICT: FAIL"
+            )
+        )
+        output = self.assert_gate_fails(routes=routes)
+        self.assertIn("explicit REVIEW_VERDICT: PASS", output)
 
     def test_not_run_cross_check_fails(self):
         body = self.body.replace(
