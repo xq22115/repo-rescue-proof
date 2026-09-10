@@ -29,24 +29,43 @@ jobs:
               "Tests",
               "Cross-checks",
               "Remaining gaps",
+              "Final status",
           ]
 
-          errors = []
-          for heading in required:
+          def section(heading):
               pattern = re.compile(
                   rf"(?ims)^##\s+{re.escape(heading)}\s*$\n(.*?)(?=^##\s+|\Z)"
               )
               match = pattern.search(body)
               if not match:
+                  return None
+              return re.sub(r"<!--.*?-->", "", match.group(1), flags=re.S).strip()
+
+          errors = []
+          sections = {}
+          for heading in required:
+              content = section(heading)
+              if content is None:
                   errors.append(f"missing section: ## {heading}")
-                  continue
-
-              content = re.sub(r"<!--.*?-->", "", match.group(1), flags=re.S).strip()
-              if not content:
+              elif not content:
                   errors.append(f"empty section: ## {heading}")
+              else:
+                  sections[heading] = content
 
-          if not re.search(r"\b(PASS|FAIL|BLOCKED|NOT RUN)\b", body, flags=re.I):
-              errors.append("missing explicit status: PASS / FAIL / BLOCKED / NOT RUN")
+          for heading in ("Read-back evidence", "Tests", "Cross-checks"):
+              content = sections.get(heading, "")
+              if not re.search(r"\bPASS\b", content, flags=re.I):
+                  errors.append(f"{heading} must contain PASS evidence")
+              if re.search(r"\b(FAIL|BLOCKED|NOT\s+RUN)\b", content, flags=re.I):
+                  errors.append(f"{heading} still contains a non-passing status")
+
+          remaining = sections.get("Remaining gaps", "")
+          if remaining and not re.fullmatch(r"(?is)none\.?", remaining.strip()):
+              errors.append("Remaining gaps must be exactly None before final acceptance")
+
+          final_status = sections.get("Final status", "")
+          if final_status and not re.fullmatch(r"(?is)PASS\.?", final_status.strip()):
+              errors.append("Final status must be exactly PASS")
 
           if errors:
               print("PR evidence gate failed:")
