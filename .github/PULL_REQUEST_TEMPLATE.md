@@ -12,19 +12,23 @@
 
 ## Read-back evidence
 
-<!-- Re-read the changed state after writes. Include exact files/refs/statuses that prove the mutation landed as intended. -->
+<!-- Must contain PASS only after the changed state has been re-read and matched to the intended mutation. -->
 
 ## Tests
 
-<!-- Record commands/checks and explicit PASS / FAIL / BLOCKED / NOT RUN status. Never infer PASS from absence of an error message. -->
+<!-- Must contain PASS only after relevant tests/checks actually ran successfully. FAIL / BLOCKED / NOT RUN must not be converted into PASS by explanation. -->
 
 ## Cross-checks
 
-<!-- Record an independent review/check where available (for example CI, CodeRabbit, another verifier, or a second data source). Distinguish independent evidence from self-review. -->
+<!-- Must contain PASS only after an independent check is complete where available (for example CI plus a separate reviewer/verifier). Self-review alone is not independent evidence. -->
 
 ## Remaining gaps
 
-<!-- State anything unresolved or not run. Write "None" only when every acceptance criterion has evidence. -->
+<!-- Must be exactly "None" before final acceptance. Otherwise leave the PR non-passing. -->
+
+## Final status
+
+<!-- Must be exactly PASS only when every acceptance criterion has observable evidence. -->
 
 ## Acceptance checklist
 
@@ -35,6 +39,7 @@
 - [ ] Relevant tests actually executed
 - [ ] Independent cross-check completed where available
 - [ ] No completion claim relies only on documentation, policy, plausibility, or explanation
-- [ ] Final status is explicitly PASS / FAIL / BLOCKED / NOT RUN
+- [ ] Remaining gaps are None
+- [ ] Final status is PASS
 
 Closes #
