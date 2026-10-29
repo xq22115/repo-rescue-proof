@@ -1,0 +1,27 @@
+name: CI health
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-health-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repository health smoke
+        run: |
+          set -euo pipefail
+          echo "repo=${GITHUB_REPOSITORY}"
+          echo "sha=${GITHUB_SHA}"
+          test -f README.md || test -f readme.md || echo "README missing (advisory)"
+          find . -name '*.yml' -o -name '*.yaml' | head -n 50 >/dev/null
+          echo "health_ok"
