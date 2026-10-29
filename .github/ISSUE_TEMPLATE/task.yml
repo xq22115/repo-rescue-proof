@@ -1,0 +1,26 @@
+name: Task
+description: Automation-friendly task with acceptance criteria
+title: "[task] "
+labels: ["automation"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Desired end state
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance / DoD
+      description: Falsifiable checks
+    validations:
+      required: true
+  - type: textarea
+    id: verify
+    attributes:
+      label: How to verify
+      description: Exact commands / URLs
+    validations:
+      required: true
